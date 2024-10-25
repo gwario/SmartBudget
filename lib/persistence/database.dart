@@ -91,8 +91,8 @@ class DatabaseService {
           default:
             throw ArgumentError('Unhandled periodicity "${budget.schedule.periodicity}"!');
         }
-        var data = await db.rawQuery('SELECT date, '
-            'sum(amount) as balance, '
+        var data = await db.rawQuery('SELECT dateTime, '
+            'sum(amount) as balance '
             'FROM expense '
             'WHERE budget = ? AND date BETWEEN "?" AND "?";', [budget.id, start.toIso8601String(), end.toIso8601String()]);
         log(data.toString());
