@@ -1,4 +1,5 @@
 import 'dart:developer';
+import 'dart:io';
 import 'dart:isolate';
 
 import 'package:smart_budget/budget_detail.dart';
@@ -9,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'persistence/model.dart';
+import 'theme.dart';
 
 const simplePeriodicTask = 'at.ameise.smart_budget.task.updateBalances';
 
@@ -95,7 +97,8 @@ class _OverviewPageState extends State<OverviewPage> {
                           setState(() {});
                         },
                         child: Padding(
-                          padding: const EdgeInsets.all(5),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 15, vertical: 10),
                           child: _buildListItemWidget(budget),
                           // child: _buildCardListItemWidget(budget),
                         ));
@@ -116,8 +119,13 @@ class _OverviewPageState extends State<OverviewPage> {
     return Card(
         child: ListTile(
       title: SafeArea(
-          child: Text(budget.title,
-              textAlign: TextAlign.start, overflow: TextOverflow.ellipsis)),
+          child: Text(
+        budget.title,
+        textAlign: TextAlign.start,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            fontSize: budgetLabelFontSize, fontWeight: FontWeight.bold),
+      )),
       subtitle: _buildProgressIndicator(budget),
       trailing: _buildBudgetStatus(budget),
       isThreeLine: true,
@@ -133,20 +141,26 @@ class _OverviewPageState extends State<OverviewPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
               child: SafeArea(
                   child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(budget.title,
-                      textAlign: TextAlign.start,
-                      overflow: TextOverflow.ellipsis),
-                  _buildBudgetStatus(budget)
+                  Flexible(
+                      child: Text(
+                    budget.title,
+                    textAlign: TextAlign.start,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: budgetLabelFontSize,
+                        fontWeight: FontWeight.bold),
+                  )),
+                  _buildBudgetStatus(budget),
                 ],
               )),
             ),
             Padding(
-              padding: const EdgeInsets.only(bottom: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 1),
               child: _buildProgressIndicator(budget),
             ),
           ],
@@ -156,8 +170,7 @@ class _OverviewPageState extends State<OverviewPage> {
   }
 
   Widget _buildBudgetStatus(Budget budget) {
-    final format = NumberFormat.simpleCurrency(
-        locale: Localizations.localeOf(context).toString());
+    final format = NumberFormat.simpleCurrency(locale: Platform.localeName);
 
     if (budget.balance > budget.schedule.budget) {
       var surplusPct = (budget.balance - budget.schedule.budget) *
@@ -165,12 +178,16 @@ class _OverviewPageState extends State<OverviewPage> {
           budget.schedule.budget;
       var surplus = budget.schedule.budget - budget.balance;
       return Text(
-          "${surplus.toStringAsFixed(2)}${format.currencySymbol} (+${surplusPct.toStringAsFixed(2)}% over ${budget.schedule.budget.toStringAsFixed(2)}${format.currencySymbol})",
-          style: const TextStyle(color: Colors.red));
+        "${surplus.toStringAsFixed(0)}${format.currencySymbol} (+${surplusPct.toStringAsFixed(1)}% over ${budget.schedule.budget.toStringAsFixed(0)}${format.currencySymbol})",
+        style:
+            const TextStyle(color: Colors.red, fontSize: budgetLabelFontSize),
+      );
     } else {
       var consumedPct = _getBudgetUtilization(budget) * 100;
       return Text(
-          "${budget.balance.toStringAsFixed(2)}${format.currencySymbol} (${consumedPct.toStringAsFixed(2)}% of ${budget.schedule.budget.toStringAsFixed(2)}${format.currencySymbol})");
+        "${budget.balance.toStringAsFixed(0)}${format.currencySymbol} (${consumedPct.toStringAsFixed(1)}% of ${budget.schedule.budget.toStringAsFixed(0)}${format.currencySymbol})",
+        style: const TextStyle(fontSize: budgetLabelFontSize),
+      );
     }
   }
 
@@ -189,10 +206,18 @@ class _OverviewPageState extends State<OverviewPage> {
     if (budget.balance > budget.schedule.budget) {
       var surplus = (budget.balance - budget.schedule.budget) /
           (budget.schedule.budget * 100);
-      return LinearProgressIndicator(value: surplus, color: Colors.red);
+      return LinearProgressIndicator(
+        value: surplus,
+        color: Colors.red,
+        minHeight: balanceStatusBarHeight,
+        borderRadius: balanceStatusBarBorderRadius,
+      );
     } else {
       return LinearProgressIndicator(
-          value: 1.0 - _getBudgetUtilization(budget));
+        value: 1.0 - _getBudgetUtilization(budget),
+        minHeight: balanceStatusBarHeight,
+        borderRadius: balanceStatusBarBorderRadius,
+      );
     }
   }
 }

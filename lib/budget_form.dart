@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:smart_budget/persistence/database.dart';
 import 'package:currency_text_input_formatter/currency_text_input_formatter.dart';
 import 'package:flutter/material.dart';
@@ -16,7 +18,7 @@ class BudgetForm extends StatefulWidget {
 class _BudgetFormState extends State<BudgetForm> {
   final dbService = DatabaseService();
   final _formKey = GlobalKey<_BudgetFormState>();
-
+  final dateTimeFormat = DateFormat('EEEE dd. MMMM, yyyy', Platform.localeName);
   final _periodicityWithParam = [
     Periodicity.years,
     Periodicity.months,
@@ -29,17 +31,19 @@ class _BudgetFormState extends State<BudgetForm> {
   int? _periodicityParam;
   Periodicity? _periodicity;
   bool _carryOver = false;
-  final DateTime _startDateTime = DateTime.now();
+  DateTime? _startDateTime;
 
   @override
   Widget build(BuildContext context) {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final locale = Localizations.localeOf(context);
-    final format = NumberFormat.simpleCurrency(locale: locale.toString());
+    final locale = Platform.localeName;
+    final format = NumberFormat.simpleCurrency(
+        locale: locale.toString(), decimalDigits: 0);
     final currencyFormatter = CurrencyTextInputFormatter.currency(
-        decimalDigits: 2, enableNegative: false);
-    var enabledPeriodicities = Periodicity.values.where((val) => [Periodicity.monthly, Periodicity.yearly].contains(val));
+        decimalDigits: 0, enableNegative: false);
+    var enabledPeriodicities = Periodicity.values.where(
+        (val) => [Periodicity.monthly, Periodicity.yearly].contains(val));
     return Scaffold(
       appBar: AppBar(
           leading: IconButton(
@@ -130,35 +134,43 @@ class _BudgetFormState extends State<BudgetForm> {
                           labelText: 'Number of ${_periodicity!.name}')),
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
-                  child: InputDatePickerFormField(
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.utc(
-                        DateTime.now().year + 1, DateTime.now().month),
+                  child: TextFormField(
+                    decoration: InputDecoration(hintText: 'Start date'),
+                    controller: TextEditingController(
+                        text: _startDateTime != null
+                            ? dateTimeFormat.format(_startDateTime!)
+                            : ''),
+                    readOnly: true,
+                    onTap: () => showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now().add(Duration(seconds: 1)),
+                      initialEntryMode: DatePickerEntryMode.calendarOnly,
+                      firstDate: DateTime(DateTime.now().year),
+                      lastDate: DateTime(DateTime.now().year + 1),
+                    ).then((value) => setState(() => _startDateTime = value)),
+                    validator: (value) =>
+                        (value != null && value.trim().isNotEmpty)
+                            ? null
+                            : 'Required',
                   ),
                 ),
                 ElevatedButton(
                   onPressed: () async {
-                    // if (_formKey.currentState!.validate()) {
-                    //   print("validation failed");
-                    // }
-                    print(_title);
-                    print(_budget);
-                    print(_carryOver);
-                    print(_periodicity);
-                    print(_periodicityParam);
-                    await dbService.insertBudget(Budget(
-                        title: _title!,
-                        balance: 0,
-                        schedule: BudgetSchedule(
-                            carryOver: false,
-                            budget: _budget!,
-                            periodicity: _periodicity!,
-                            periodParam: _periodicityParam,
-                            start: DateTime.now())));
-                    navigator.pop();
-                    messenger.showSnackBar(
-                      const SnackBar(content: Text('Processing Data')),
-                    );
+                    if (validate()) {
+                      await dbService.insertBudget(Budget(
+                          title: _title!,
+                          balance: 0,
+                          schedule: BudgetSchedule(
+                              carryOver: false,
+                              budget: _budget!,
+                              periodicity: _periodicity!,
+                              periodParam: _periodicityParam,
+                              start: _startDateTime!)));
+                      navigator.pop();
+                      messenger.showSnackBar(
+                        const SnackBar(content: Text('Processing Data')),
+                      );
+                    }
                   },
                   child: const Text('Create'),
                 ),
@@ -166,5 +178,20 @@ class _BudgetFormState extends State<BudgetForm> {
             )),
       ),
     );
+  }
+
+  bool validate() {
+    print(_title);
+    print(_budget);
+    print(_carryOver);
+    print(_periodicity);
+    print(_periodicityParam);
+
+    return _title != null &&
+        _title!.trim().isNotEmpty &&
+        _budget != null &&
+        _budget! > 0 &&
+        _periodicity != null &&
+        _startDateTime != null;
   }
 }

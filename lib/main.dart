@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'budget_list.dart';
 
 void main() async {
-  runApp(const BudgetScheduleApp());
+  initializeDateFormatting().then((_) => runApp(const BudgetScheduleApp()));
 }
 
 class BudgetScheduleApp extends StatelessWidget {

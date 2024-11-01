@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:smart_budget/persistence/database.dart';
 import 'package:currency_text_input_formatter/currency_text_input_formatter.dart';
 import 'package:flutter/material.dart';
@@ -14,14 +16,22 @@ class BudgetDetail extends StatefulWidget {
 
 class _BudgetScreenState extends State<BudgetDetail> {
   final dbService = DatabaseService();
-  final _currencyFormatter = CurrencyTextInputFormatter.currency(
-      enableNegative: false, decimalDigits: 2, minValue: 0);
+  final _expenseCurrencyFormatter = CurrencyTextInputFormatter.currency(
+      locale: Platform.localeName,
+      enableNegative: false,
+      decimalDigits: 2,
+      minValue: 0);
+  final _budgetCurrencyFormatter = CurrencyTextInputFormatter.currency(
+      locale: Platform.localeName,
+      enableNegative: false,
+      decimalDigits: 0,
+      minValue: 0);
 
   @override
   Widget build(BuildContext context) {
     final budget = ModalRoute.of(context)!.settings.arguments as Budget;
-    final expenseDateTimeFormat = DateFormat(
-        'yyyy MMMM, dd. (EEEE)', Localizations.localeOf(context).toString());
+    final expenseDateTimeFormat =
+        DateFormat('yyyy MMMM, dd. (EEEE)', Platform.localeName);
     return Scaffold(
         appBar: AppBar(
             leading: IconButton(
@@ -32,7 +42,11 @@ class _BudgetScreenState extends State<BudgetDetail> {
                 child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                  Text(budget.title),
+                  Flexible(
+                      child: Text(
+                    budget.title,
+                    overflow: TextOverflow.ellipsis,
+                  )),
                   if (budget.schedule.carryOver)
                     const Icon(Icons.switch_access_shortcut_add)
                 ]))),
@@ -50,17 +64,17 @@ class _BudgetScreenState extends State<BudgetDetail> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Balance'),
-                                Text(_currencyFormatter
-                                    .formatDouble(budget.balance))
+                                const Text('Budget'),
+                                Text(_budgetCurrencyFormatter
+                                    .formatDouble(budget.schedule.budget))
                               ],
                             ),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('Budget'),
-                                Text(_currencyFormatter
-                                    .formatDouble(budget.schedule.budget))
+                                const Text('Balance'),
+                                Text(_budgetCurrencyFormatter
+                                    .formatDouble(budget.balance))
                               ],
                             )
                           ],
@@ -89,7 +103,7 @@ class _BudgetScreenState extends State<BudgetDetail> {
                                                 children: [
                                                   Text(expenseDateTimeFormat
                                                       .format(e.dateTime)),
-                                                  Text(_currencyFormatter
+                                                  Text(_expenseCurrencyFormatter
                                                       .formatDouble(e.amount))
                                                 ],
                                               ))
@@ -133,15 +147,18 @@ class _BudgetScreenState extends State<BudgetDetail> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 15),
               child: TextFormField(
-                inputFormatters: [_currencyFormatter],
+                inputFormatters: [_expenseCurrencyFormatter],
                 onChanged: (value) => setState(() => expenseAmount =
-                    _currencyFormatter.format.tryParse(value)!.toDouble()),
+                    _expenseCurrencyFormatter.format
+                        .tryParse(value)!
+                        .toDouble()),
                 keyboardType: const TextInputType.numberWithOptions(
                     decimal: true, signed: false),
                 validator: (value) {
                   if (value == null ||
-                      _currencyFormatter.format.tryParse(value) == null ||
-                      _currencyFormatter.format.tryParse(value)! < 1) {
+                      _expenseCurrencyFormatter.format.tryParse(value) ==
+                          null ||
+                      _expenseCurrencyFormatter.format.tryParse(value)! < 1) {
                     return 'Value must not be blank nor negative!';
                   }
                   return null;
