@@ -139,3 +139,5 @@ app.*.symbols
 !/dev/ci/**/Gemfile.lock
 !.vscode/settings.json
 /store-entry/
+/lib/generated/assets.dart
+/assets/debug.db

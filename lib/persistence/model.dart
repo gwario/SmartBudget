@@ -1,57 +1,165 @@
 import 'package:sqflite_common/sqlite_api.dart';
+import 'package:intl/intl.dart';
 
-const int MODEL_VERSION = 3;
+const int modelVersion = 6;
 
 class Budget {
   int? id;
   String title;
-  double balance;
+  int balance; // Spent in current period (micros)
+  int carryOver; // Accumulated from past periods (micros)
   BudgetSchedule schedule;
 
   Budget(
       {this.id,
       required this.title,
       this.balance = 0,
+      this.carryOver = 0,
       required this.schedule});
 
   static Future<void> sqlCreate(Database db) =>
       db.execute('CREATE TABLE IF NOT EXISTS budget('
           'id INTEGER PRIMARY KEY, '
           'title TEXT, '
-          'balance REAL, '
+          'balance INTEGER, '
+          'carryOver INTEGER DEFAULT 0, '
           'schedule INTEGER, '
           'FOREIGN KEY(schedule) REFERENCES budget_schedule(id))');
 
   static Future<int> insert(Database db, Budget budget) =>
       BudgetSchedule.insert(db, budget.schedule).then((schedule) => db
           .rawInsert(
-              'INSERT INTO budget(title, balance, schedule) VALUES(?,?,?)',
-              [budget.title, budget.balance, schedule]));
+              'INSERT INTO budget(title, balance, carryOver, schedule) VALUES(?,?,?,?)',
+              [budget.title, budget.balance, budget.carryOver, schedule]));
 
-  static Future<int> delete(Database db, Budget budget) =>
-      BudgetSchedule.delete(db, budget.schedule).then((schedule) =>
-          db.rawDelete('DELETE FROM budget WHERE id = ?', [budget.id]));
+  static Future<int> delete(Database db, Budget budget) async {
+    await db.rawDelete('DELETE FROM expense WHERE budget = ?', [budget.id]);
+    return BudgetSchedule.delete(db, budget.schedule).then((schedule) =>
+        db.rawDelete('DELETE FROM budget WHERE id = ?', [budget.id]));
+  }
 
   static Future<int> save(Database db, Budget budget) =>
       BudgetSchedule.save(db, budget.schedule).then((schedule) => db.rawUpdate(
-          'UPDATE budget SET title = ?, balance = ? WHERE id = ?',
-          [budget.title, budget.balance, budget.id]));
+          'UPDATE budget SET title = ?, balance = ?, carryOver = ? WHERE id = ?',
+          [budget.title, budget.balance, budget.carryOver, budget.id]));
 
   factory Budget.fromJson(Map<String, dynamic> data) => Budget(
-        id: data['id'],
+        id: data['budget_id'] ?? data['id'],
         title: data['title'],
-        balance: data['balance'],
+        balance: (data['balance'] as num).toInt(),
+        carryOver: (data['carryOverAmt'] ?? data['carryOver'] as num?)?.toInt() ?? 0,
         schedule: BudgetSchedule.fromJson(data),
       );
 
-  Map<String, dynamic> toMap() =>
-      {'id': id, 'title': title, 'balance': balance, 'schedule': schedule.id};
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'title': title,
+        'balance': balance,
+        'carryOver': carryOver,
+        'schedule': schedule.id
+      };
+
+  int get totalBudget => schedule.budget + carryOver;
+
+  int get periodsElapsed {
+    final now = DateTime.now().toUtc();
+    final start = schedule.start.toUtc();
+    if (now.isBefore(start)) return 0;
+
+    int n = schedule.periodParam ?? 1;
+    int units = 0;
+    switch (schedule.periodicity) {
+      case Periodicity.seconds:
+        units = now.difference(start).inSeconds;
+      case Periodicity.minutes:
+        units = now.difference(start).inMinutes;
+      case Periodicity.hours:
+        units = now.difference(start).inHours;
+      case Periodicity.daily:
+      case Periodicity.days:
+        units = now.difference(start).inDays;
+      case Periodicity.weekly:
+      case Periodicity.weeks:
+        units = (now.difference(start).inDays / 7).floor();
+      case Periodicity.monthly:
+      case Periodicity.months:
+        units = (now.year - start.year) * 12 + (now.month - start.month);
+      case Periodicity.yearly:
+      case Periodicity.years:
+        units = (now.year - start.year);
+    }
+    return (units / n).floor() + 1;
+  }
+
+  double get utilization => totalBudget == 0 ? 0 : balance / totalBudget;
+
+  int getPeriodIndex(DateTime dt) {
+    final start = schedule.start.toUtc();
+    final d = dt.toUtc();
+    if (d.isBefore(start)) return -1;
+
+    int n = schedule.periodParam ?? 1;
+    int units = 0;
+    switch (schedule.periodicity) {
+      case Periodicity.seconds:
+        units = d.difference(start).inSeconds;
+      case Periodicity.minutes:
+        units = d.difference(start).inMinutes;
+      case Periodicity.hours:
+        units = d.difference(start).inHours;
+      case Periodicity.daily:
+      case Periodicity.days:
+        units = d.difference(start).inDays;
+      case Periodicity.weekly:
+      case Periodicity.weeks:
+        units = (d.difference(start).inDays / 7).floor();
+      case Periodicity.monthly:
+      case Periodicity.months:
+        units = (d.year - start.year) * 12 + (d.month - start.month);
+      case Periodicity.yearly:
+      case Periodicity.years:
+        units = (d.year - start.year);
+    }
+    return (units / n).floor();
+  }
+
+  DateTime getPeriodStart(int index) {
+    final start = schedule.start.toUtc();
+    int n = schedule.periodParam ?? 1;
+    int totalUnits = index * n;
+
+    switch (schedule.periodicity) {
+      case Periodicity.seconds:
+        return start.add(Duration(seconds: totalUnits));
+      case Periodicity.minutes:
+        return start.add(Duration(minutes: totalUnits));
+      case Periodicity.hours:
+        return start.add(Duration(hours: totalUnits));
+      case Periodicity.daily:
+      case Periodicity.days:
+        return start.add(Duration(days: totalUnits));
+      case Periodicity.weekly:
+      case Periodicity.weeks:
+        return start.add(Duration(days: totalUnits * 7));
+      case Periodicity.monthly:
+      case Periodicity.months:
+        return DateTime.utc(start.year, start.month + totalUnits, start.day);
+      case Periodicity.yearly:
+      case Periodicity.years:
+        return DateTime.utc(start.year + totalUnits, start.month, start.day);
+    }
+  }
+
+  String formatCurrency(num microAmount, {int decimalDigits = 2}) {
+    final format = NumberFormat.simpleCurrency(name: schedule.currencyCode, decimalDigits: decimalDigits);
+    return format.format(microAmount / 1000000.0);
+  }
 }
 
 class Expense {
   int? id;
   int budget;
-  double amount;
+  int amount; // Stored in micros
   DateTime dateTime;
 
   Expense(
@@ -64,7 +172,7 @@ class Expense {
       db.execute('CREATE TABLE IF NOT EXISTS expense('
           'id INTEGER PRIMARY KEY, '
           'budget INTEGER, '
-          'amount REAL, '
+          'amount INTEGER, '
           'dateTime INTEGER, '
           'FOREIGN KEY(budget) REFERENCES budget(id))');
 
@@ -81,7 +189,7 @@ class Expense {
   factory Expense.fromJson(Map<String, dynamic> data) => Expense(
         id: data['id'],
         budget: data['budget'],
-        amount: data['amount'],
+        amount: (data['amount'] as num).toInt(),
         dateTime:
             DateTime.fromMillisecondsSinceEpoch(data['dateTime'], isUtc: true),
       );
@@ -96,11 +204,12 @@ class Expense {
 
 class BudgetSchedule {
   int? id;
-  double budget;
+  int budget; // Stored in micros
   bool carryOver;
   Periodicity periodicity;
   int? periodParam;
   DateTime start;
+  String currencyCode;
 
   BudgetSchedule(
       {int? id,
@@ -108,51 +217,106 @@ class BudgetSchedule {
       required this.carryOver,
       required this.periodicity,
       this.periodParam,
-      required this.start});
+      required this.start,
+      required this.currencyCode});
 
   static Future<void> sqlCreate(Database db) =>
       db.execute('CREATE TABLE IF NOT EXISTS budget_schedule('
           'id INTEGER PRIMARY KEY, '
-          'budget REAL, '
+          'budget INTEGER, '
           'carryOver INTEGER, '
           'periodicity TEXT, '
           'periodParam INTEGER, '
-          'start INTEGER)');
+          'start INTEGER, '
+          'currencyCode TEXT)');
 
   static Future<int> insert(Database db, BudgetSchedule schedule) =>
       db.rawInsert(
-          'INSERT INTO budget_schedule(budget, carryOver, periodicity, periodParam, start) VALUES(?,?,?,?,?)',
-          [
-            schedule.budget,
-            schedule.carryOver ? 1 : 0,
-            schedule.periodicity.toString(),
-            schedule.periodParam,
-            schedule.start.toUtc().millisecondsSinceEpoch
-          ]);
-
-  static Future<int> delete(Database db, BudgetSchedule schedule) =>
-      db.rawDelete('DELETE FROM budget_schedule WHERE id = ?', [schedule.id]);
-
-  static Future<int> save(Database db, BudgetSchedule schedule) => db.rawUpdate(
-          'UPDATE budget_schedule SET budget = ?, carryOver = ?, periodicity = ?, periodParam = ?, start = ? WHERE id = ?',
+          'INSERT INTO budget_schedule(budget, carryOver, periodicity, periodParam, start, currencyCode) VALUES(?,?,?,?,?,?)',
           [
             schedule.budget,
             schedule.carryOver ? 1 : 0,
             schedule.periodicity.toString(),
             schedule.periodParam,
             schedule.start.toUtc().millisecondsSinceEpoch,
+            schedule.currencyCode
+          ]);
+
+  static Future<int> delete(Database db, BudgetSchedule schedule) =>
+      db.rawDelete('DELETE FROM budget_schedule WHERE id = ?', [schedule.id]);
+
+  static Future<int> save(Database db, BudgetSchedule schedule) => db.rawUpdate(
+          'UPDATE budget_schedule SET budget = ?, carryOver = ?, periodicity = ?, periodParam = ?, start = ?, currencyCode = ? WHERE id = ?',
+          [
+            schedule.budget,
+            schedule.carryOver ? 1 : 0,
+            schedule.periodicity.toString(),
+            schedule.periodParam,
+            schedule.start.toUtc().millisecondsSinceEpoch,
+            schedule.currencyCode,
             schedule.id
           ]);
 
   factory BudgetSchedule.fromJson(Map<String, dynamic> data) => BudgetSchedule(
         id: data['schedule'],
-        budget: data['budget'],
-        carryOver: data['carryOver'] == 1 ? true : false,
+        budget: (data['budget'] as num).toInt(),
+        carryOver: (data['isCarryOver'] ?? data['carryOver']) == 1 ? true : false,
         periodicity: Periodicity.values
             .firstWhere((element) => element.toString() == data['periodicity']),
         periodParam: data['periodParam'],
         start: DateTime.fromMillisecondsSinceEpoch(data['start'], isUtc: true),
+        currencyCode: data['currencyCode'] ?? 'USD',
       );
+
+  String get periodLabel {
+    int n = periodParam ?? 1;
+    switch (periodicity) {
+      case Periodicity.seconds:
+        return n == 1 ? 'per second' : 'per $n seconds';
+      case Periodicity.minutes:
+        return n == 1 ? 'per minute' : 'per $n minutes';
+      case Periodicity.hours:
+        return n == 1 ? 'per hour' : 'per $n hours';
+      case Periodicity.daily:
+      case Periodicity.days:
+        return n == 1 ? 'per day' : 'per $n days';
+      case Periodicity.weekly:
+      case Periodicity.weeks:
+        return n == 1 ? 'per week' : 'per $n weeks';
+      case Periodicity.monthly:
+      case Periodicity.months:
+        return n == 1 ? 'per month' : 'per $n months';
+      case Periodicity.yearly:
+      case Periodicity.years:
+        return n == 1 ? 'per year' : 'per $n years';
+    }
+  }
+
+  String get periodLabelShort {
+    int n = periodParam ?? 1;
+    String unit;
+    switch (periodicity) {
+      case Periodicity.seconds:
+        unit = 's';
+      case Periodicity.minutes:
+        unit = 'm';
+      case Periodicity.hours:
+        unit = 'h';
+      case Periodicity.daily:
+      case Periodicity.days:
+        unit = 'd';
+      case Periodicity.weekly:
+      case Periodicity.weeks:
+        unit = 'w';
+      case Periodicity.monthly:
+      case Periodicity.months:
+        unit = 'mo';
+      case Periodicity.yearly:
+      case Periodicity.years:
+        unit = 'y';
+    }
+    return 'per $n$unit';
+  }
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -161,7 +325,20 @@ class BudgetSchedule {
         'periodicity': periodicity.toString(),
         'periodParam': periodParam,
         'start': start.toUtc().millisecondsSinceEpoch,
+        'currencyCode': currencyCode,
       };
 }
 
-enum Periodicity { days, daily, weeks, weekly, months, monthly, years, yearly }
+enum Periodicity {
+  seconds,
+  minutes,
+  hours,
+  days,
+  daily,
+  weeks,
+  weekly,
+  months,
+  monthly,
+  years,
+  yearly
+}

@@ -1,12 +1,10 @@
 import 'dart:developer';
-import 'dart:io';
 import 'dart:isolate';
 
+import 'package:flutter/material.dart';
 import 'package:smart_budget/budget_detail.dart';
 import 'package:smart_budget/budget_form.dart';
 import 'package:smart_budget/persistence/database.dart';
-import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'persistence/model.dart';
@@ -46,23 +44,24 @@ class _OverviewPageState extends State<OverviewPage> {
 
   @override
   void initState() {
+    super.initState();
+    dbService.updateBalances().then((_) => setState(() {}));
     Workmanager().initialize(
       callbackDispatcher,
-      isInDebugMode: true,
     );
     log('Registering periodic balance calculations...');
     Workmanager().registerPeriodicTask(
       simplePeriodicTask,
       'UpdateBalancesTask',
-      initialDelay: Duration.zero,
-      frequency: Duration(minutes: 15),
+      initialDelay: const Duration(minutes: 1),
+      frequency: const Duration(minutes: 15),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
-    super.initState();
   }
 
   @override
-  void dispose() async {
-    await Workmanager().cancelAll();
+  void dispose() {
+    // Removed cancelAll() to allow task to run in background
     super.dispose();
   }
 
@@ -72,6 +71,15 @@ class _OverviewPageState extends State<OverviewPage> {
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () async {
+              await dbService.updateBalances();
+              setState(() {});
+            },
+          )
+        ],
       ),
       body: FutureBuilder<List<Budget>>(
           future: dbService.getBudgets(),
@@ -115,84 +123,60 @@ class _OverviewPageState extends State<OverviewPage> {
     );
   }
 
-  Widget _buildCardListItemWidget(Budget budget) {
-    return Card(
-        child: ListTile(
-      title: SafeArea(
-          child: Text(
-        budget.title,
-        textAlign: TextAlign.start,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-            fontSize: budgetLabelFontSize, fontWeight: FontWeight.bold),
-      )),
-      subtitle: _buildProgressIndicator(budget),
-      trailing: _buildBudgetStatus(budget),
-      isThreeLine: true,
-    ));
-  }
-
   Widget _buildListItemWidget(Budget budget) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-            child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-              child: SafeArea(
-                  child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Flexible(
-                      child: Text(
-                    budget.title,
-                    textAlign: TextAlign.start,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: budgetLabelFontSize,
-                        fontWeight: FontWeight.bold),
-                  )),
-                  _buildBudgetStatus(budget),
-                ],
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Flexible(
+                  child: Text(
+                budget.title,
+                textAlign: TextAlign.start,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: budgetLabelFontSize,
+                    fontWeight: FontWeight.bold),
               )),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 1),
-              child: _buildProgressIndicator(budget),
-            ),
-          ],
-        )),
+              _buildBudgetStatus(budget),
+            ],
+          ),
+        ),
+        _buildProgressIndicator(budget),
       ],
     );
   }
 
   Widget _buildBudgetStatus(Budget budget) {
-    final format = NumberFormat.simpleCurrency(locale: Platform.localeName);
+    final utilization = budget.utilization;
+    final totalBudget = budget.totalBudget;
+    final carryOver = budget.carryOver;
 
-    if (budget.balance > budget.schedule.budget) {
-      var surplusPct = (budget.balance - budget.schedule.budget) *
-          100 /
-          budget.schedule.budget;
-      var surplus = budget.schedule.budget - budget.balance;
-      return Text(
-        "${surplus.toStringAsFixed(0)}${format.currencySymbol} (+${surplusPct.toStringAsFixed(1)}% over ${budget.schedule.budget.toStringAsFixed(0)}${format.currencySymbol})",
-        style:
-            const TextStyle(color: Colors.red, fontSize: budgetLabelFontSize),
-      );
-    } else {
-      var consumedPct = _getBudgetUtilization(budget) * 100;
-      return Text(
-        "${budget.balance.toStringAsFixed(0)}${format.currencySymbol} (${consumedPct.toStringAsFixed(1)}% of ${budget.schedule.budget.toStringAsFixed(0)}${format.currencySymbol})",
-        style: const TextStyle(fontSize: budgetLabelFontSize),
-      );
-    }
-  }
-
-  double _getBudgetUtilization(Budget budget) {
-    return budget.balance / budget.schedule.budget;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          '${budget.formatCurrency(budget.balance, decimalDigits: 0)} used of ${budget.formatCurrency(totalBudget, decimalDigits: 0)} ${budget.schedule.periodLabelShort}',
+          style: TextStyle(
+            fontSize: budgetLabelFontSize,
+            color: utilization > 1.0 ? Colors.red : Colors.black,
+          ),
+        ),
+        if (budget.schedule.carryOver)
+          Text(
+            '(${carryOver >= 0 ? "+" : ""}${budget.formatCurrency(carryOver, decimalDigits: 0)} from past periods)',
+            style: TextStyle(
+              fontSize: budgetLabelFontSize - 4,
+              color: carryOver >= 0 ? Colors.green : Colors.orange,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildListItemSeparator(BuildContext context, int index) {
@@ -203,18 +187,17 @@ class _OverviewPageState extends State<OverviewPage> {
   }
 
   Widget _buildProgressIndicator(Budget budget) {
-    if (budget.balance > budget.schedule.budget) {
-      var surplus = (budget.balance - budget.schedule.budget) /
-          (budget.schedule.budget * 100);
+    final utilization = budget.utilization;
+    if (utilization > 1.0) {
       return LinearProgressIndicator(
-        value: surplus,
+        value: (utilization - 1.0).clamp(0.0, 1.0),
         color: Colors.red,
         minHeight: balanceStatusBarHeight,
         borderRadius: balanceStatusBarBorderRadius,
       );
     } else {
       return LinearProgressIndicator(
-        value: 1.0 - _getBudgetUtilization(budget),
+        value: 1.0 - utilization,
         minHeight: balanceStatusBarHeight,
         borderRadius: balanceStatusBarBorderRadius,
       );
