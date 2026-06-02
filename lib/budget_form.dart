@@ -1,10 +1,10 @@
-import 'dart:io';
-
-import 'package:smart_budget/persistence/database.dart';
 import 'package:currency_text_input_formatter/currency_text_input_formatter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:smart_budget/persistence/database.dart';
+import 'package:smart_budget/settings.dart';
 
 import 'persistence/model.dart';
 
@@ -18,9 +18,7 @@ class BudgetForm extends StatefulWidget {
 class _BudgetFormState extends State<BudgetForm> {
   final dbService = DatabaseService();
   final _formKey = GlobalKey<FormState>();
-  final dateTimeFormat = DateFormat('EEEE dd. MMMM, yyyy', Platform.localeName);
   final _periodicityWithParam = [
-    Periodicity.seconds,
     Periodicity.minutes,
     Periodicity.hours,
     Periodicity.days,
@@ -37,6 +35,19 @@ class _BudgetFormState extends State<BudgetForm> {
   DateTime? _startDateTime = DateTime.now();
   final _dateController = TextEditingController();
 
+  final _enabledPeriodicities = [
+    Periodicity.minutes,
+    Periodicity.hours,
+    Periodicity.daily,
+    Periodicity.days,
+    Periodicity.weekly,
+    Periodicity.weeks,
+    Periodicity.monthly,
+    Periodicity.months,
+    Periodicity.yearly,
+    Periodicity.years,
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -45,7 +56,8 @@ class _BudgetFormState extends State<BudgetForm> {
 
   void _updateDateDisplay() {
     if (_startDateTime != null) {
-      _dateController.text = dateTimeFormat.format(_startDateTime!);
+      final settings = context.read<SettingsProvider>();
+      _dateController.text = settings.getDateFormat().format(_startDateTime!);
     }
   }
 
@@ -55,24 +67,46 @@ class _BudgetFormState extends State<BudgetForm> {
     super.dispose();
   }
 
+  String _getPeriodicityLabel(Periodicity p) {
+    switch (p) {
+      case Periodicity.minutes: return 'Every X minutes';
+      case Periodicity.hours: return 'Every X hours';
+      case Periodicity.daily: return 'Daily';
+      case Periodicity.days: return 'Every X days';
+      case Periodicity.weekly: return 'Weekly';
+      case Periodicity.weeks: return 'Every X weeks';
+      case Periodicity.monthly: return 'Monthly';
+      case Periodicity.months: return 'Every X months';
+      case Periodicity.yearly: return 'Yearly';
+      case Periodicity.years: return 'Every X years';
+      default: return p.name[0].toUpperCase() + p.name.substring(1);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
-    final defaultCurrency = NumberFormat().currencyName ?? 'USD';
-    final format = NumberFormat.simpleCurrency(
-        name: defaultCurrency, decimalDigits: 0);
+    final settings = context.watch<SettingsProvider>();
+
+    final displayCurrency = settings.effectiveCurrency;
+    final format =
+        NumberFormat.simpleCurrency(name: displayCurrency, decimalDigits: 0);
     final currencyFormatter = CurrencyTextInputFormatter.currency(
-        name: defaultCurrency, decimalDigits: 0, enableNegative: false);
-    var enabledPeriodicities = [
-      Periodicity.seconds,
-      Periodicity.minutes,
-      Periodicity.hours,
-      Periodicity.daily,
-      Periodicity.weekly,
-      Periodicity.monthly,
-      Periodicity.yearly,
-    ];
+        name: displayCurrency, decimalDigits: 0, enableNegative: false);
+
+    final commonCurrencies = {
+      'USD': 'US Dollar (\$)',
+      'EUR': 'Euro (€)',
+      'GBP': 'British Pound (£)',
+      'JPY': 'Japanese Yen (¥)',
+      'CHF': 'Swiss Franc (CHF)',
+      'AUD': 'Australian Dollar (A\$)',
+      'CAD': 'Canadian Dollar (C\$)',
+      'CNY': 'Chinese Yuan (¥)',
+      'KWD': 'Kuwaiti Dinar (KWD)',
+    };
+
     return Scaffold(
       appBar: AppBar(
           leading: IconButton(
@@ -97,16 +131,19 @@ class _BudgetFormState extends State<BudgetForm> {
                         labelText: 'Title',
                       )),
                   TextFormField(
+                    key: ValueKey('budget_input_$displayCurrency'),
                     inputFormatters: [currencyFormatter],
-                    onChanged: (value) => setState(() => _budget =
-                        currencyFormatter.format.tryParse(value)?.toDouble()),
+                    onChanged: (value) {
+                      setState(() {
+                        _budget =
+                            currencyFormatter.getUnformattedValue().toDouble();
+                      });
+                    },
                     keyboardType: const TextInputType.numberWithOptions(
                         decimal: true, signed: false),
                     validator: (value) {
-                      if (value == null ||
-                          currencyFormatter.format.tryParse(value) == null ||
-                          currencyFormatter.format.tryParse(value)! < 1) {
-                        return 'Value must not be blank nor negative!';
+                      if (_budget == null || _budget! <= 0) {
+                        return 'Value must be greater than zero!';
                       }
                       return null;
                     },
@@ -129,17 +166,54 @@ class _BudgetFormState extends State<BudgetForm> {
                       ),
                     ],
                   ),
-                  DropdownButtonFormField(
+                  DropdownButtonFormField<String>(
                     decoration: const InputDecoration(
                       border: UnderlineInputBorder(),
                       labelText: 'Periodicity',
                     ),
-                    onChanged: (value) => setState(() => _periodicity =
-                        enabledPeriodicities.firstWhere((e) => e.name == value)),
-                    items: enabledPeriodicities
+                    value: _periodicity?.name,
+                    onChanged: (value) {
+                      if (value == null) return;
+                      final periodicity =
+                          Periodicity.values.firstWhere((e) => e.name == value);
+                      setState(() {
+                        _periodicity = periodicity;
+                        if (periodicity == Periodicity.monthly) {
+                          _periodicityParam = 1;
+                          if (_startDateTime != null) {
+                            _startDateTime = DateTime(
+                                _startDateTime!.year, _startDateTime!.month, 1);
+                            _updateDateDisplay();
+                          }
+                        } else if (periodicity == Periodicity.weekly) {
+                          _periodicityParam = 1;
+                          if (_startDateTime != null) {
+                            int targetDay;
+                            if (settings.firstDayOfWeek != null) {
+                              targetDay = settings.firstDayOfWeek!;
+                            } else {
+                              final firstDayOfWeekIndex = MaterialLocalizations.of(context).firstDayOfWeekIndex;
+                              targetDay = firstDayOfWeekIndex == 0 ? 7 : firstDayOfWeekIndex;
+                            }
+                            final currentDay = _startDateTime!.weekday;
+                            final daysToSubtract = (currentDay - targetDay + 7) % 7;
+                            _startDateTime = _startDateTime!.subtract(Duration(days: daysToSubtract));
+                            _updateDateDisplay();
+                          }
+                        } else if (periodicity == Periodicity.yearly) {
+                          _periodicityParam = 1;
+                          if (_startDateTime != null) {
+                            _startDateTime =
+                                DateTime(_startDateTime!.year, 1, 1);
+                            _updateDateDisplay();
+                          }
+                        }
+                      });
+                    },
+                    items: _enabledPeriodicities
                         .map((e) => DropdownMenuItem(
                               value: e.name,
-                              child: Text(e.name[0].toUpperCase() + e.name.substring(1)),
+                              child: Text(_getPeriodicityLabel(e)),
                             ))
                         .toList(),
                   ),
@@ -200,13 +274,18 @@ class _BudgetFormState extends State<BudgetForm> {
                     child: ElevatedButton(
                       onPressed: () async {
                         if (_formKey.currentState?.validate() ?? false) {
-                          if (_title == null || _budget == null || _periodicity == null || _startDateTime == null) {
+                          if (_title == null ||
+                              _budget == null ||
+                              _periodicity == null ||
+                              _startDateTime == null) {
                             return;
                           }
                           DateTime startTime = _startDateTime!;
                           // If the user picked today, use current time instead of midnight
                           final now = DateTime.now();
-                          if (startTime.year == now.year && startTime.month == now.month && startTime.day == now.day) {
+                          if (startTime.year == now.year &&
+                              startTime.month == now.month &&
+                              startTime.day == now.day) {
                             startTime = now;
                           }
 
@@ -219,7 +298,7 @@ class _BudgetFormState extends State<BudgetForm> {
                                   periodicity: _periodicity!,
                                   periodParam: _periodicityParam,
                                   start: startTime,
-                                  currencyCode: defaultCurrency)));
+                                  currencyCode: displayCurrency)));
                           navigator.pop();
                           messenger.showSnackBar(
                             const SnackBar(content: Text('Budget created')),
@@ -234,20 +313,5 @@ class _BudgetFormState extends State<BudgetForm> {
         ),
       ),
     );
-  }
-
-  bool validate() {
-    print(_title);
-    print(_budget);
-    print(_carryOver);
-    print(_periodicity);
-    print(_periodicityParam);
-
-    return _title != null &&
-        _title!.trim().isNotEmpty &&
-        _budget != null &&
-        _budget! > 0 &&
-        _periodicity != null &&
-        _startDateTime != null;
   }
 }

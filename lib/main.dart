@@ -1,10 +1,27 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:timezone/data/latest.dart' as tz;
 
 import 'budget_list.dart';
+import 'settings.dart';
 
 void main() async {
-  initializeDateFormatting().then((_) => runApp(const BudgetScheduleApp()));
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting();
+  tz.initializeTimeZones();
+
+  Intl.defaultLocale = Platform.localeName;
+
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => SettingsProvider(),
+      child: const BudgetScheduleApp(),
+    ),
+  );
 }
 
 class BudgetScheduleApp extends StatelessWidget {
@@ -12,8 +29,18 @@ class BudgetScheduleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final settings = Provider.of<SettingsProvider>(context);
+    final locale = settings.locale != null ? Locale(settings.locale!) : null;
+
+    if (settings.locale != null) {
+      Intl.defaultLocale = settings.locale;
+    } else {
+      Intl.defaultLocale = Platform.localeName;
+    }
+
     return MaterialApp(
       title: 'Budget Schedule',
+      locale: locale,
       theme: ThemeData(
         // This is the theme of your application.
         //

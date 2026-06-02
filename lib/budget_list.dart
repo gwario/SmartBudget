@@ -2,9 +2,12 @@ import 'dart:developer';
 import 'dart:isolate';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smart_budget/budget_detail.dart';
 import 'package:smart_budget/budget_form.dart';
 import 'package:smart_budget/persistence/database.dart';
+import 'package:smart_budget/settings.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'persistence/model.dart';
@@ -15,9 +18,11 @@ const simplePeriodicTask = 'at.ameise.smart_budget.task.updateBalances';
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
+    final prefs = await SharedPreferences.getInstance();
+    final locationName = prefs.getString('selected_timezone');
     final dbService = DatabaseService();
     log('Processing task...');
-    await dbService.updateBalances();
+    await dbService.updateBalances(locationName: locationName);
     log('Done!');
     return Future.value(true);
   });
@@ -45,7 +50,12 @@ class _OverviewPageState extends State<OverviewPage> {
   @override
   void initState() {
     super.initState();
-    dbService.updateBalances().then((_) => setState(() {}));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final settings = context.read<SettingsProvider>();
+      dbService
+          .updateBalances(locationName: settings.timezone)
+          .then((_) => setState(() {}));
+    });
     Workmanager().initialize(
       callbackDispatcher,
     );
@@ -75,10 +85,19 @@ class _OverviewPageState extends State<OverviewPage> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () async {
-              await dbService.updateBalances();
+              final settings = context.read<SettingsProvider>();
+              await dbService.updateBalances(locationName: settings.timezone);
               setState(() {});
             },
-          )
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const SettingsPage()),
+              );
+            },
+          ),
         ],
       ),
       body: FutureBuilder<List<Budget>>(
@@ -139,8 +158,7 @@ class _OverviewPageState extends State<OverviewPage> {
                 textAlign: TextAlign.start,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: budgetLabelFontSize,
-                    fontWeight: FontWeight.bold),
+                    fontSize: budgetLabelFontSize, fontWeight: FontWeight.bold),
               )),
               _buildBudgetStatus(budget),
             ],
@@ -153,14 +171,14 @@ class _OverviewPageState extends State<OverviewPage> {
 
   Widget _buildBudgetStatus(Budget budget) {
     final utilization = budget.utilization;
-    final totalBudget = budget.totalBudget;
+    final baseBudget = budget.schedule.budget;
     final carryOver = budget.carryOver;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Text(
-          '${budget.formatCurrency(budget.balance, decimalDigits: 0)} used of ${budget.formatCurrency(totalBudget, decimalDigits: 0)} ${budget.schedule.periodLabelShort}',
+          '${budget.formatCurrency(budget.balance, decimalDigits: 0)} used of ${budget.formatCurrency(baseBudget, decimalDigits: 0)} ${budget.schedule.periodLabelShort}',
           style: TextStyle(
             fontSize: budgetLabelFontSize,
             color: utilization > 1.0 ? Colors.red : Colors.black,
@@ -168,7 +186,7 @@ class _OverviewPageState extends State<OverviewPage> {
         ),
         if (budget.schedule.carryOver)
           Text(
-            '(${carryOver >= 0 ? "+" : ""}${budget.formatCurrency(carryOver, decimalDigits: 0)} from past periods)',
+            '${carryOver >= 0 ? "+" : ""}${budget.formatCurrency(carryOver, decimalDigits: 0)} from past periods',
             style: TextStyle(
               fontSize: budgetLabelFontSize - 4,
               color: carryOver >= 0 ? Colors.green : Colors.orange,

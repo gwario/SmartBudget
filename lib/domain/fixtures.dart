@@ -51,7 +51,8 @@ class Fixtures {
         currencyCode: currencyCode);
   }
 
-  static Expense exampleExpense({required Budget budget, int? amount, DateTime? date}) {
+  static Expense exampleExpense(
+      {required Budget budget, int? amount, DateTime? date}) {
     amount ??= (_rng.nextDouble() * 1000).toInt();
     date ??= DateTime.now();
     return Expense(budget: budget.id!, amount: amount, dateTime: date);

@@ -1,7 +1,8 @@
-import 'package:sqflite_common/sqlite_api.dart';
 import 'package:intl/intl.dart';
+import 'package:sqflite_common/sqlite_api.dart';
+import 'package:timezone/timezone.dart' as tz;
 
-const int modelVersion = 6;
+const int MODEL_VERSION = 6;
 
 class Budget {
   int? id;
@@ -26,11 +27,11 @@ class Budget {
           'schedule INTEGER, '
           'FOREIGN KEY(schedule) REFERENCES budget_schedule(id))');
 
-  static Future<int> insert(Database db, Budget budget) =>
-      BudgetSchedule.insert(db, budget.schedule).then((schedule) => db
-          .rawInsert(
-              'INSERT INTO budget(title, balance, carryOver, schedule) VALUES(?,?,?,?)',
-              [budget.title, budget.balance, budget.carryOver, schedule]));
+  static Future<int> insert(Database db, Budget budget) => BudgetSchedule
+          .insert(db, budget.schedule)
+      .then((schedule) => db.rawInsert(
+          'INSERT INTO budget(title, balance, carryOver, schedule) VALUES(?,?,?,?)',
+          [budget.title, budget.balance, budget.carryOver, schedule]));
 
   static Future<int> delete(Database db, Budget budget) async {
     await db.rawDelete('DELETE FROM expense WHERE budget = ?', [budget.id]);
@@ -47,7 +48,8 @@ class Budget {
         id: data['budget_id'] ?? data['id'],
         title: data['title'],
         balance: (data['balance'] as num).toInt(),
-        carryOver: (data['carryOverAmt'] ?? data['carryOver'] as num?)?.toInt() ?? 0,
+        carryOver:
+            (data['carryOverAmt'] ?? data['carryOver'] as num?)?.toInt() ?? 0,
         schedule: BudgetSchedule.fromJson(data),
       );
 
@@ -61,9 +63,12 @@ class Budget {
 
   int get totalBudget => schedule.budget + carryOver;
 
-  int get periodsElapsed {
-    final now = DateTime.now().toUtc();
-    final start = schedule.start.toUtc();
+  int getPeriodsElapsed({String? locationName}) {
+    final location =
+        locationName != null ? tz.getLocation(locationName) : tz.local;
+    final now = tz.TZDateTime.from(DateTime.now(), location);
+    final start = tz.TZDateTime.from(schedule.start, location);
+
     if (now.isBefore(start)) return 0;
 
     int n = schedule.periodParam ?? 1;
@@ -71,31 +76,43 @@ class Budget {
     switch (schedule.periodicity) {
       case Periodicity.seconds:
         units = now.difference(start).inSeconds;
+        break;
       case Periodicity.minutes:
         units = now.difference(start).inMinutes;
+        break;
       case Periodicity.hours:
         units = now.difference(start).inHours;
+        break;
       case Periodicity.daily:
       case Periodicity.days:
         units = now.difference(start).inDays;
+        break;
       case Periodicity.weekly:
       case Periodicity.weeks:
         units = (now.difference(start).inDays / 7).floor();
+        break;
       case Periodicity.monthly:
       case Periodicity.months:
         units = (now.year - start.year) * 12 + (now.month - start.month);
+        break;
       case Periodicity.yearly:
       case Periodicity.years:
         units = (now.year - start.year);
+        break;
     }
     return (units / n).floor() + 1;
   }
 
+  int get periodsElapsed => getPeriodsElapsed();
+
   double get utilization => totalBudget == 0 ? 0 : balance / totalBudget;
 
-  int getPeriodIndex(DateTime dt) {
-    final start = schedule.start.toUtc();
-    final d = dt.toUtc();
+  int getPeriodIndex(DateTime dt, {String? locationName}) {
+    final location =
+        locationName != null ? tz.getLocation(locationName) : tz.local;
+    final start = tz.TZDateTime.from(schedule.start, location);
+    final d = tz.TZDateTime.from(dt, location);
+
     if (d.isBefore(start)) return -1;
 
     int n = schedule.periodParam ?? 1;
@@ -103,28 +120,37 @@ class Budget {
     switch (schedule.periodicity) {
       case Periodicity.seconds:
         units = d.difference(start).inSeconds;
+        break;
       case Periodicity.minutes:
         units = d.difference(start).inMinutes;
+        break;
       case Periodicity.hours:
         units = d.difference(start).inHours;
+        break;
       case Periodicity.daily:
       case Periodicity.days:
         units = d.difference(start).inDays;
+        break;
       case Periodicity.weekly:
       case Periodicity.weeks:
         units = (d.difference(start).inDays / 7).floor();
+        break;
       case Periodicity.monthly:
       case Periodicity.months:
         units = (d.year - start.year) * 12 + (d.month - start.month);
+        break;
       case Periodicity.yearly:
       case Periodicity.years:
         units = (d.year - start.year);
+        break;
     }
     return (units / n).floor();
   }
 
-  DateTime getPeriodStart(int index) {
-    final start = schedule.start.toUtc();
+  DateTime getPeriodStart(int index, {String? locationName}) {
+    final location =
+        locationName != null ? tz.getLocation(locationName) : tz.local;
+    final start = tz.TZDateTime.from(schedule.start, location);
     int n = schedule.periodParam ?? 1;
     int totalUnits = index * n;
 
@@ -143,15 +169,18 @@ class Budget {
         return start.add(Duration(days: totalUnits * 7));
       case Periodicity.monthly:
       case Periodicity.months:
-        return DateTime.utc(start.year, start.month + totalUnits, start.day);
+        return tz.TZDateTime(location, start.year, start.month + totalUnits,
+            start.day, start.hour, start.minute, start.second);
       case Periodicity.yearly:
       case Periodicity.years:
-        return DateTime.utc(start.year + totalUnits, start.month, start.day);
+        return tz.TZDateTime(location, start.year + totalUnits, start.month,
+            start.day, start.hour, start.minute, start.second);
     }
   }
 
   String formatCurrency(num microAmount, {int decimalDigits = 2}) {
-    final format = NumberFormat.simpleCurrency(name: schedule.currencyCode, decimalDigits: decimalDigits);
+    final format = NumberFormat.simpleCurrency(
+        name: schedule.currencyCode, decimalDigits: decimalDigits);
     return format.format(microAmount / 1000000.0);
   }
 }
@@ -260,7 +289,8 @@ class BudgetSchedule {
   factory BudgetSchedule.fromJson(Map<String, dynamic> data) => BudgetSchedule(
         id: data['schedule'],
         budget: (data['budget'] as num).toInt(),
-        carryOver: (data['isCarryOver'] ?? data['carryOver']) == 1 ? true : false,
+        carryOver:
+            (data['isCarryOver'] ?? data['carryOver']) == 1 ? true : false,
         periodicity: Periodicity.values
             .firstWhere((element) => element.toString() == data['periodicity']),
         periodParam: data['periodParam'],
@@ -298,22 +328,29 @@ class BudgetSchedule {
     switch (periodicity) {
       case Periodicity.seconds:
         unit = 's';
+        break;
       case Periodicity.minutes:
         unit = 'm';
+        break;
       case Periodicity.hours:
         unit = 'h';
+        break;
       case Periodicity.daily:
       case Periodicity.days:
         unit = 'd';
+        break;
       case Periodicity.weekly:
       case Periodicity.weeks:
         unit = 'w';
+        break;
       case Periodicity.monthly:
       case Periodicity.months:
         unit = 'mo';
+        break;
       case Periodicity.yearly:
       case Periodicity.years:
         unit = 'y';
+        break;
     }
     return 'per $n$unit';
   }

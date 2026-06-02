@@ -1,6 +1,7 @@
 import 'package:intl/intl.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import 'model.dart';
 
@@ -26,38 +27,48 @@ class DatabaseService {
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 4) {
           // Migration from double to int (cents)
-          await db.execute('UPDATE budget SET balance = CAST(balance * 100 AS INTEGER)');
-          await db.execute('UPDATE budget_schedule SET budget = CAST(budget * 100 AS INTEGER)');
-          await db.execute('UPDATE expense SET amount = CAST(amount * 100 AS INTEGER)');
+          await db.execute(
+              'UPDATE budget SET balance = CAST(balance * 100 AS INTEGER)');
+          await db.execute(
+              'UPDATE budget_schedule SET budget = CAST(budget * 100 AS INTEGER)');
+          await db.execute(
+              'UPDATE expense SET amount = CAST(amount * 100 AS INTEGER)');
         }
         if (oldVersion < 5) {
           // Add currencyCode column safely
-          var tableInfo = await db.rawQuery('PRAGMA table_info(budget_schedule)');
-          bool columnExists = tableInfo.any((column) => column['name'] == 'currencyCode');
+          var tableInfo =
+              await db.rawQuery('PRAGMA table_info(budget_schedule)');
+          bool columnExists =
+              tableInfo.any((column) => column['name'] == 'currencyCode');
           if (!columnExists) {
-            await db.execute('ALTER TABLE budget_schedule ADD COLUMN currencyCode TEXT');
+            await db.execute(
+                'ALTER TABLE budget_schedule ADD COLUMN currencyCode TEXT');
           }
-          
+
           // Determine system currency
           String sysCurrency = NumberFormat().currencyName ?? 'USD';
-          await db.execute('UPDATE budget_schedule SET currencyCode = ?', [sysCurrency]);
+          await db.execute(
+              'UPDATE budget_schedule SET currencyCode = ?', [sysCurrency]);
 
           // Scale from cents to micros (factor 10,000) or from double to micros (factor 1,000,000)
           int factor = (oldVersion == 4) ? 10000 : 1000000;
           await db.execute('UPDATE budget SET balance = balance * ?', [factor]);
-          await db.execute('UPDATE budget_schedule SET budget = budget * ?', [factor]);
+          await db.execute(
+              'UPDATE budget_schedule SET budget = budget * ?', [factor]);
           await db.execute('UPDATE expense SET amount = amount * ?', [factor]);
         }
         if (oldVersion < 6) {
           // Add carryOver column to budget safely
           var tableInfo = await db.rawQuery('PRAGMA table_info(budget)');
-          bool columnExists = tableInfo.any((column) => column['name'] == 'carryOver');
+          bool columnExists =
+              tableInfo.any((column) => column['name'] == 'carryOver');
           if (!columnExists) {
-            await db.execute('ALTER TABLE budget ADD COLUMN carryOver INTEGER DEFAULT 0');
+            await db.execute(
+                'ALTER TABLE budget ADD COLUMN carryOver INTEGER DEFAULT 0');
           }
         }
       },
-      version: modelVersion,
+      version: MODEL_VERSION,
     );
   }
 
@@ -69,7 +80,8 @@ class DatabaseService {
 
   Future<List<Budget>> getBudgets() async {
     final db = await _databaseService.database;
-    var data = await db.rawQuery('SELECT budget_schedule.*, budget_schedule.carryOver as isCarryOver, budget.*, budget.carryOver as carryOverAmt '
+    var data = await db.rawQuery(
+        'SELECT budget_schedule.*, budget_schedule.carryOver as isCarryOver, budget.*, budget.carryOver as carryOverAmt '
         'FROM budget '
         'LEFT JOIN budget_schedule ON budget.schedule = budget_schedule.id;');
     List<Budget> budgets =
@@ -77,45 +89,33 @@ class DatabaseService {
     return budgets;
   }
 
-  Future<int> updateBalances() async {
+  Future<int> updateBalances({String? locationName}) async {
     final db = await _databaseService.database;
-    var data = await db.rawQuery('SELECT budget_schedule.*, budget_schedule.carryOver as isCarryOver, budget.*, budget.carryOver as carryOverAmt '
+    final location =
+        locationName != null ? tz.getLocation(locationName) : tz.local;
+
+    var data = await db.rawQuery(
+        'SELECT budget_schedule.*, budget_schedule.carryOver as isCarryOver, budget.*, budget.carryOver as carryOverAmt '
         'FROM budget '
         'LEFT JOIN budget_schedule ON budget.schedule = budget_schedule.id;');
     List<Budget> budgets =
-    List.generate(data.length, (index) => Budget.fromJson(data[index]));
+        List.generate(data.length, (index) => Budget.fromJson(data[index]));
 
     for (var budget in budgets) {
       int currentSpent;
       int carryOver = 0;
 
-      DateTime now = DateTime.now().toUtc();
+      final now = tz.TZDateTime.from(DateTime.now(), location);
+      final budgetStart = tz.TZDateTime.from(budget.schedule.start, location);
       DateTime currentPeriodStart;
 
-      switch (budget.schedule.periodicity) {
-        case Periodicity.seconds:
-          currentPeriodStart = budget.schedule.start.add(Duration(seconds: now.difference(budget.schedule.start).inSeconds));
-        case Periodicity.minutes:
-          currentPeriodStart = budget.schedule.start.add(Duration(minutes: now.difference(budget.schedule.start).inMinutes));
-        case Periodicity.hours:
-          currentPeriodStart = budget.schedule.start.add(Duration(hours: now.difference(budget.schedule.start).inHours));
-        case Periodicity.daily:
-        case Periodicity.days:
-          currentPeriodStart = DateTime.utc(now.year, now.month, now.day);
-        case Periodicity.weekly:
-        case Periodicity.weeks:
-          int daysFromMonday = now.weekday - 1;
-          currentPeriodStart = DateTime.utc(now.year, now.month, now.day - daysFromMonday);
-        case Periodicity.monthly:
-        case Periodicity.months:
-          currentPeriodStart = DateTime.utc(now.year, now.month, 1);
-        case Periodicity.yearly:
-        case Periodicity.years:
-          currentPeriodStart = DateTime.utc(now.year, 1, 1);
-      }
+      int currentPeriodIdx =
+          budget.getPeriodIndex(now, locationName: locationName);
+      currentPeriodStart =
+          budget.getPeriodStart(currentPeriodIdx, locationName: locationName);
 
-      if (currentPeriodStart.isBefore(budget.schedule.start)) {
-        currentPeriodStart = budget.schedule.start;
+      if (currentPeriodStart.isBefore(budgetStart)) {
+        currentPeriodStart = budgetStart;
       }
 
       // 1. Current Period Spent
@@ -128,9 +128,14 @@ class DatabaseService {
       if (budget.schedule.carryOver) {
         var dataPast = await db.rawQuery(
             'SELECT sum(amount) as spent FROM expense WHERE budget = ? AND dateTime < ? AND dateTime >= ?',
-            [budget.id, currentPeriodStart.millisecondsSinceEpoch, budget.schedule.start.millisecondsSinceEpoch]);
+            [
+              budget.id,
+              currentPeriodStart.millisecondsSinceEpoch,
+              budgetStart.millisecondsSinceEpoch
+            ]);
         int pastSpent = (dataPast.first['spent'] as num?)?.toInt() ?? 0;
-        int pastPeriods = budget.periodsElapsed - 1;
+        int pastPeriods =
+            currentPeriodIdx; // Periods fully elapsed before current
         carryOver = (pastPeriods * budget.schedule.budget) - pastSpent;
       }
 
