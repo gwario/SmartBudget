@@ -67,6 +67,44 @@ class DatabaseService {
                 'ALTER TABLE budget ADD COLUMN carryOver INTEGER DEFAULT 0');
           }
         }
+        if (oldVersion < 7) {
+          // Add carryOverLimit column to budget_schedule safely
+          var tableInfo =
+              await db.rawQuery('PRAGMA table_info(budget_schedule)');
+          bool columnExists =
+              tableInfo.any((column) => column['name'] == 'carryOverLimit');
+          if (!columnExists) {
+            await db.execute(
+                'ALTER TABLE budget_schedule ADD COLUMN carryOverLimit INTEGER');
+          }
+        }
+        if (oldVersion < 8) {
+          // Add totalExpired column to budget safely
+          var tableInfo = await db.rawQuery('PRAGMA table_info(budget)');
+          bool columnExists =
+              tableInfo.any((column) => column['name'] == 'totalExpired');
+          if (!columnExists) {
+            await db.execute(
+                'ALTER TABLE budget ADD COLUMN totalExpired INTEGER DEFAULT 0');
+          }
+        }
+      },
+      onOpen: (db) async {
+        // Safety check for carryOverLimit
+        var tableInfoSchedule =
+            await db.rawQuery('PRAGMA table_info(budget_schedule)');
+        if (!tableInfoSchedule
+            .any((column) => column['name'] == 'carryOverLimit')) {
+          await db.execute(
+              'ALTER TABLE budget_schedule ADD COLUMN carryOverLimit INTEGER');
+        }
+        // Safety check for totalExpired
+        var tableInfoBudget = await db.rawQuery('PRAGMA table_info(budget)');
+        if (!tableInfoBudget
+            .any((column) => column['name'] == 'totalExpired')) {
+          await db.execute(
+              'ALTER TABLE budget ADD COLUMN totalExpired INTEGER DEFAULT 0');
+        }
       },
       version: MODEL_VERSION,
     );
@@ -102,45 +140,79 @@ class DatabaseService {
         List.generate(data.length, (index) => Budget.fromJson(data[index]));
 
     for (var budget in budgets) {
-      int currentSpent;
-      int carryOver = 0;
-
       final now = tz.TZDateTime.from(DateTime.now(), location);
       final budgetStart = tz.TZDateTime.from(budget.schedule.start, location);
-      DateTime currentPeriodStart;
-
       int currentPeriodIdx =
           budget.getPeriodIndex(now, locationName: locationName);
-      currentPeriodStart =
-          budget.getPeriodStart(currentPeriodIdx, locationName: locationName);
 
-      if (currentPeriodStart.isBefore(budgetStart)) {
-        currentPeriodStart = budgetStart;
+      if (currentPeriodIdx < 0) {
+        budget.balance = 0;
+        budget.carryOver = 0;
+        budget.totalExpired = 0;
+        await saveBudget(budget);
+        continue;
       }
 
-      // 1. Current Period Spent
-      var dataCurrent = await db.rawQuery(
-          'SELECT sum(amount) as spent FROM expense WHERE budget = ? AND dateTime >= ?',
-          [budget.id, currentPeriodStart.millisecondsSinceEpoch]);
-      currentSpent = (dataCurrent.first['spent'] as num?)?.toInt() ?? 0;
-
-      // 2. Carry Over (if enabled)
-      if (budget.schedule.carryOver) {
-        var dataPast = await db.rawQuery(
-            'SELECT sum(amount) as spent FROM expense WHERE budget = ? AND dateTime < ? AND dateTime >= ?',
-            [
-              budget.id,
-              currentPeriodStart.millisecondsSinceEpoch,
-              budgetStart.millisecondsSinceEpoch
-            ]);
-        int pastSpent = (dataPast.first['spent'] as num?)?.toInt() ?? 0;
-        int pastPeriods =
-            currentPeriodIdx; // Periods fully elapsed before current
-        carryOver = (pastPeriods * budget.schedule.budget) - pastSpent;
+      // Fetch all expenses to calculate history accurately
+      var expensesData = await db.rawQuery(
+          'SELECT amount, dateTime FROM expense WHERE budget = ? ORDER BY dateTime ASC',
+          [budget.id]);
+      
+      Map<int, int> periodSpentMap = {};
+      for (var row in expensesData) {
+        DateTime dt = DateTime.fromMillisecondsSinceEpoch(row['dateTime'] as int, isUtc: true);
+        int idx = budget.getPeriodIndex(dt, locationName: locationName);
+        if (idx >= 0) {
+          periodSpentMap[idx] = (periodSpentMap[idx] ?? 0) + (row['amount'] as int);
+        }
       }
 
-      budget.balance = currentSpent;
-      budget.carryOver = carryOver;
+      int totalExpired = 0;
+      int carryIn = 0;
+      int B = budget.schedule.budget;
+      int? limit = budget.schedule.carryOverLimit;
+
+      for (int j = 0; j < currentPeriodIdx; j++) {
+        int avail = B + carryIn;
+        int spent = periodSpentMap[j] ?? 0;
+        int remaining = avail - spent;
+
+        // Calculate carryIn for j+1
+        int nextCarryIn = 0;
+        if (budget.schedule.carryOver) {
+          int k = j + 1;
+          int n = budget.schedule.carryOverLimit ?? k;
+          if (n > k) n = k;
+          int firstIdx = k - n;
+
+          int totalAllowanceInWindow = n * B;
+          int totalSpentInWindow = 0;
+          for (int i = firstIdx; i < k; i++) {
+            totalSpentInWindow += periodSpentMap[i] ?? 0;
+          }
+          int windowCarryIn = totalAllowanceInWindow - totalSpentInWindow;
+
+          // Debt (negative carry-over) never expires.
+          // Only positive surplus expires if it exceeds the window limit.
+          if (remaining < 0) {
+            nextCarryIn = remaining;
+          } else {
+            // It's a surplus. Cap it by the window, but don't let a window-debt 
+            // expire a global surplus (though that's logically rare if debts don't expire).
+            nextCarryIn = remaining < windowCarryIn ? remaining : (windowCarryIn > 0 ? windowCarryIn : 0);
+          }
+        }
+
+        int expiredInThisPeriod = remaining - nextCarryIn;
+        if (expiredInThisPeriod > 0) {
+          totalExpired += expiredInThisPeriod;
+        }
+        carryIn = nextCarryIn;
+      }
+
+      budget.balance = periodSpentMap[currentPeriodIdx] ?? 0;
+      budget.carryOver = carryIn;
+      budget.totalExpired = totalExpired;
       await saveBudget(budget);
     }
 

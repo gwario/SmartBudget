@@ -2,13 +2,14 @@ import 'package:intl/intl.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 import 'package:timezone/timezone.dart' as tz;
 
-const int MODEL_VERSION = 6;
+const int MODEL_VERSION = 8;
 
 class Budget {
   int? id;
   String title;
   int balance; // Spent in current period (micros)
   int carryOver; // Accumulated from past periods (micros)
+  int totalExpired; // Total amount expired over time (micros)
   BudgetSchedule schedule;
 
   Budget(
@@ -16,6 +17,7 @@ class Budget {
       required this.title,
       this.balance = 0,
       this.carryOver = 0,
+      this.totalExpired = 0,
       required this.schedule});
 
   static Future<void> sqlCreate(Database db) =>
@@ -24,14 +26,21 @@ class Budget {
           'title TEXT, '
           'balance INTEGER, '
           'carryOver INTEGER DEFAULT 0, '
+          'totalExpired INTEGER DEFAULT 0, '
           'schedule INTEGER, '
           'FOREIGN KEY(schedule) REFERENCES budget_schedule(id))');
 
   static Future<int> insert(Database db, Budget budget) => BudgetSchedule
           .insert(db, budget.schedule)
-      .then((schedule) => db.rawInsert(
-          'INSERT INTO budget(title, balance, carryOver, schedule) VALUES(?,?,?,?)',
-          [budget.title, budget.balance, budget.carryOver, schedule]));
+      .then((scheduleId) => db.rawInsert(
+          'INSERT INTO budget(title, balance, carryOver, totalExpired, schedule) VALUES(?,?,?,?,?)',
+          [
+            budget.title,
+            budget.balance,
+            budget.carryOver,
+            budget.totalExpired,
+            scheduleId
+          ]));
 
   static Future<int> delete(Database db, Budget budget) async {
     await db.rawDelete('DELETE FROM expense WHERE budget = ?', [budget.id]);
@@ -41,8 +50,14 @@ class Budget {
 
   static Future<int> save(Database db, Budget budget) =>
       BudgetSchedule.save(db, budget.schedule).then((schedule) => db.rawUpdate(
-          'UPDATE budget SET title = ?, balance = ?, carryOver = ? WHERE id = ?',
-          [budget.title, budget.balance, budget.carryOver, budget.id]));
+          'UPDATE budget SET title = ?, balance = ?, carryOver = ?, totalExpired = ? WHERE id = ?',
+          [
+            budget.title,
+            budget.balance,
+            budget.carryOver,
+            budget.totalExpired,
+            budget.id
+          ]));
 
   factory Budget.fromJson(Map<String, dynamic> data) => Budget(
         id: data['budget_id'] ?? data['id'],
@@ -50,6 +65,7 @@ class Budget {
         balance: (data['balance'] as num).toInt(),
         carryOver:
             (data['carryOverAmt'] ?? data['carryOver'] as num?)?.toInt() ?? 0,
+        totalExpired: (data['totalExpired'] as num?)?.toInt() ?? 0,
         schedule: BudgetSchedule.fromJson(data),
       );
 
@@ -58,6 +74,7 @@ class Budget {
         'title': title,
         'balance': balance,
         'carryOver': carryOver,
+        'totalExpired': totalExpired,
         'schedule': schedule.id
       };
 
@@ -235,6 +252,7 @@ class BudgetSchedule {
   int? id;
   int budget; // Stored in micros
   bool carryOver;
+  int? carryOverLimit;
   Periodicity periodicity;
   int? periodParam;
   DateTime start;
@@ -244,6 +262,7 @@ class BudgetSchedule {
       {int? id,
       required this.budget,
       required this.carryOver,
+      this.carryOverLimit,
       required this.periodicity,
       this.periodParam,
       required this.start,
@@ -254,6 +273,7 @@ class BudgetSchedule {
           'id INTEGER PRIMARY KEY, '
           'budget INTEGER, '
           'carryOver INTEGER, '
+          'carryOverLimit INTEGER, '
           'periodicity TEXT, '
           'periodParam INTEGER, '
           'start INTEGER, '
@@ -261,10 +281,11 @@ class BudgetSchedule {
 
   static Future<int> insert(Database db, BudgetSchedule schedule) =>
       db.rawInsert(
-          'INSERT INTO budget_schedule(budget, carryOver, periodicity, periodParam, start, currencyCode) VALUES(?,?,?,?,?,?)',
+          'INSERT INTO budget_schedule(budget, carryOver, carryOverLimit, periodicity, periodParam, start, currencyCode) VALUES(?,?,?,?,?,?,?)',
           [
             schedule.budget,
             schedule.carryOver ? 1 : 0,
+            schedule.carryOverLimit,
             schedule.periodicity.toString(),
             schedule.periodParam,
             schedule.start.toUtc().millisecondsSinceEpoch,
@@ -275,10 +296,11 @@ class BudgetSchedule {
       db.rawDelete('DELETE FROM budget_schedule WHERE id = ?', [schedule.id]);
 
   static Future<int> save(Database db, BudgetSchedule schedule) => db.rawUpdate(
-          'UPDATE budget_schedule SET budget = ?, carryOver = ?, periodicity = ?, periodParam = ?, start = ?, currencyCode = ? WHERE id = ?',
+          'UPDATE budget_schedule SET budget = ?, carryOver = ?, carryOverLimit = ?, periodicity = ?, periodParam = ?, start = ?, currencyCode = ? WHERE id = ?',
           [
             schedule.budget,
             schedule.carryOver ? 1 : 0,
+            schedule.carryOverLimit,
             schedule.periodicity.toString(),
             schedule.periodParam,
             schedule.start.toUtc().millisecondsSinceEpoch,
@@ -291,6 +313,7 @@ class BudgetSchedule {
         budget: (data['budget'] as num).toInt(),
         carryOver:
             (data['isCarryOver'] ?? data['carryOver']) == 1 ? true : false,
+        carryOverLimit: data['carryOverLimit'],
         periodicity: Periodicity.values
             .firstWhere((element) => element.toString() == data['periodicity']),
         periodParam: data['periodParam'],
@@ -359,6 +382,7 @@ class BudgetSchedule {
         'id': id,
         'budget': budget,
         'carryOver': carryOver,
+        'carryOverLimit': carryOverLimit,
         'periodicity': periodicity.toString(),
         'periodParam': periodParam,
         'start': start.toUtc().millisecondsSinceEpoch,

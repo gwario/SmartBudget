@@ -71,84 +71,41 @@ class _BudgetScreenState extends State<BudgetDetail> {
               body: Padding(
                   padding: const EdgeInsets.all(10),
                   child: SafeArea(
-                      child: SingleChildScrollView(
-                    child: Column(
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 15),
-                            child: Column(
-                              children: [
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text('Base Budget'),
-                                    Text(
-                                        '${budget.formatCurrency(budget.schedule.budget)} ${budget.schedule.periodLabel}')
-                                  ],
+                    child: FutureBuilder<List<Expense>>(
+                        future: dbService.getExpenses(budget.id!),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                                child: CircularProgressIndicator());
+                          }
+                          if (snapshot.hasError) {
+                            return const Center(child: Text('Error.'));
+                          }
+                          final expenses = snapshot.data ?? [];
+                          return Column(
+                            mainAxisAlignment: MainAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _buildSummaryHeader(budget, expenses, settings),
+                              const SizedBox(height: 15),
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    children: expenses.isEmpty
+                                        ? [
+                                            const Center(
+                                                child: Text('No expenses yet.'))
+                                          ]
+                                        : _buildGroupedExpenses(
+                                            budget, expenses, settings),
+                                  ),
                                 ),
-                                if (budget.schedule.carryOver) ...[
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      const Text('Carry Over'),
-                                      Text(
-                                          budget
-                                              .formatCurrency(budget.carryOver),
-                                          style: TextStyle(
-                                              color: budget.carryOver >= 0
-                                                  ? Colors.green
-                                                  : Colors.red))
-                                    ],
-                                  ),
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      const Text('Actual Budget'),
-                                      Text(
-                                          budget.formatCurrency(
-                                              budget.totalBudget),
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold))
-                                    ],
-                                  ),
-                                ],
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text('Spent (This Period)'),
-                                    Text(budget.formatCurrency(budget.balance))
-                                  ],
-                                )
-                              ],
-                            ),
-                          ),
-                          FutureBuilder<List<Expense>>(
-                              future: dbService.getExpenses(budget.id!),
-                              builder: (context, snapshot) {
-                                if (snapshot.connectionState ==
-                                    ConnectionState.waiting) {
-                                  return const Center(
-                                      child: CircularProgressIndicator());
-                                }
-                                if (snapshot.hasData) {
-                                  if (snapshot.data!.isEmpty) {
-                                    return const Center(
-                                        child: Text('No expenses yet.'));
-                                  }
-                                  return Column(
-                                      children: _buildGroupedExpenses(
-                                          budget, snapshot.data!, settings));
-                                }
-                                return const Center(child: Text('Error.'));
-                              }),
-                        ]),
-                  ))),
+                              ),
+                            ],
+                          );
+                        }),
+                  )),
               floatingActionButton: Column(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -170,6 +127,173 @@ class _BudgetScreenState extends State<BudgetDetail> {
                 ],
               ));
         });
+  }
+
+  Widget _buildSummaryHeader(
+      Budget budget, List<Expense> expenses, SettingsProvider settings) {
+    int currentPeriodIdx =
+        budget.getPeriodsElapsed(locationName: settings.timezone) - 1;
+
+    int carryFromPrev = 0;
+    int carryFromOlder = 0;
+    int expiredInThisPeriod = 0;
+
+    if (budget.schedule.carryOver && currentPeriodIdx >= 0) {
+      Map<int, int> periodSpentMap = {};
+      for (var e in expenses) {
+        int idx =
+            budget.getPeriodIndex(e.dateTime, locationName: settings.timezone);
+        if (idx >= 0) {
+          periodSpentMap[idx] = (periodSpentMap[idx] ?? 0) + e.amount;
+        }
+      }
+
+      int currentCarryIn = 0;
+      int B = budget.schedule.budget;
+      int? limit = budget.schedule.carryOverLimit;
+
+      for (int j = 0; j <= currentPeriodIdx; j++) {
+        int avail = B + currentCarryIn;
+        int spent = periodSpentMap[j] ?? 0;
+        int remaining = avail - spent;
+
+        if (j == currentPeriodIdx) {
+          if (j > 0) {
+            carryFromPrev = B - (periodSpentMap[j - 1] ?? 0);
+            carryFromOlder = currentCarryIn - carryFromPrev;
+          }
+        }
+
+        // Calculate carryIn for j+1
+        int nextCarryIn = 0;
+        int k = j + 1;
+        int n = limit ?? k;
+        if (n > k) n = k;
+        int firstIdx = k - n;
+
+        int totalAllowanceInWindow = n * B;
+        int totalSpentInWindow = 0;
+        for (int i = firstIdx; i < k; i++) {
+          totalSpentInWindow += periodSpentMap[i] ?? 0;
+        }
+        int windowCarryIn = totalAllowanceInWindow - totalSpentInWindow;
+
+        if (remaining < 0) {
+          nextCarryIn = remaining;
+        } else {
+          nextCarryIn = remaining < windowCarryIn
+              ? remaining
+              : (windowCarryIn > 0 ? windowCarryIn : 0);
+        }
+
+        if (j == currentPeriodIdx) {
+          expiredInThisPeriod = remaining - nextCarryIn;
+        }
+        currentCarryIn = nextCarryIn;
+      }
+    }
+
+    int totalSpent = expenses.fold(0, (sum, e) => sum + e.amount);
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Base Budget', style: TextStyle(fontSize: 16)),
+            Text(
+                '${budget.formatCurrency(budget.schedule.budget)} ${budget.schedule.periodLabel}',
+                style: const TextStyle(fontSize: 16))
+          ],
+        ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Total Spent', style: TextStyle(fontSize: 16)),
+                const Text('Since start',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+            Text(budget.formatCurrency(totalSpent),
+                style: const TextStyle(fontSize: 16))
+          ],
+        ),
+        if (budget.schedule.carryOver) ...[
+          if (budget.totalExpired > 0)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Total Savings', style: TextStyle(fontSize: 16)),
+                    const Text('Expired positive carry over',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+                Text(budget.formatCurrency(budget.totalExpired),
+                    style: const TextStyle(fontSize: 18, color: Colors.blue))
+              ],
+            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Carry Over', style: TextStyle(fontSize: 16)),
+                  if (budget.schedule.carryOverLimit != null)
+                    Text(
+                      'Positive expires after ${budget.schedule.carryOverLimit} periods',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  if (currentPeriodIdx > 0) ...[
+                    Text(
+                      '  • from prev: ${budget.formatCurrency(carryFromPrev, decimalDigits: 0)}',
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    Text(
+                      '  • from older: ${budget.formatCurrency(carryFromOlder, decimalDigits: 0)}',
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ]
+                ],
+              ),
+              Text(budget.formatCurrency(budget.carryOver),
+                  style: TextStyle(
+                      fontSize: 16,
+                      color: budget.carryOver >= 0 ? Colors.green : Colors.red))
+            ],
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Actual Budget', style: TextStyle(fontSize: 16)),
+              Text(budget.formatCurrency(budget.totalBudget),
+                  style: const TextStyle(fontSize: 18))
+            ],
+          ),
+        ],
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Spent', style: TextStyle(fontSize: 16)),
+                const Text('This Period',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+            Text(budget.formatCurrency(budget.balance),
+                style: const TextStyle(fontSize: 16))
+          ],
+        )
+      ],
+    );
   }
 
   List<Widget> _buildGroupedExpenses(
@@ -220,15 +344,54 @@ class _BudgetScreenState extends State<BudgetDetail> {
 
       // Calculate carry over into THIS specific period
       int carryOverIntoThisPeriod = 0;
+      int carryFromPrev = 0;
+      int carryFromOlder = 0;
+      int expiredInThisPeriod = 0;
       if (budget.schedule.carryOver) {
-        int totalAllowanceBefore = idx * budget.schedule.budget;
-        int totalSpentBefore = 0;
-        for (var entry in periodSpentMap.entries) {
-          if (entry.key < idx) {
-            totalSpentBefore += entry.value;
+        int currentCarryIn = 0;
+        int B = budget.schedule.budget;
+        int? limit = budget.schedule.carryOverLimit;
+
+        for (int j = 0; j <= idx; j++) {
+          int avail = B + currentCarryIn;
+          int spent = periodSpentMap[j] ?? 0;
+          int remaining = avail - spent;
+
+          if (j == idx) {
+            carryOverIntoThisPeriod = currentCarryIn;
+            if (j > 0) {
+              carryFromPrev = B - (periodSpentMap[j - 1] ?? 0);
+              carryFromOlder = currentCarryIn - carryFromPrev;
+            }
           }
+
+          // Calculate carryIn for j+1
+          int nextCarryIn = 0;
+          int k = j + 1;
+          int n = limit ?? k;
+          if (n > k) n = k;
+          int firstIdx = k - n;
+
+          int totalAllowanceInWindow = n * B;
+          int totalSpentInWindow = 0;
+          for (int i = firstIdx; i < k; i++) {
+            totalSpentInWindow += periodSpentMap[i] ?? 0;
+          }
+          int windowCarryIn = totalAllowanceInWindow - totalSpentInWindow;
+
+          if (remaining < 0) {
+            nextCarryIn = remaining;
+          } else {
+            nextCarryIn = remaining < windowCarryIn
+                ? remaining
+                : (windowCarryIn > 0 ? windowCarryIn : 0);
+          }
+
+          if (j == idx) {
+            expiredInThisPeriod = remaining - nextCarryIn;
+          }
+          currentCarryIn = nextCarryIn;
         }
-        carryOverIntoThisPeriod = totalAllowanceBefore - totalSpentBefore;
       }
 
       // Period Header
@@ -242,18 +405,40 @@ class _BudgetScreenState extends State<BudgetDetail> {
           children: [
             Text(
               'Period $idx ($periodLabel)',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             if (budget.schedule.carryOver && idx > 0)
-              Text(
-                'Carry in: ${budget.formatCurrency(carryOverIntoThisPeriod)}',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: carryOverIntoThisPeriod >= 0
-                      ? Colors.green.shade700
-                      : Colors.red.shade700,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'Carry in: ${budget.formatCurrency(carryOverIntoThisPeriod)}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: carryOverIntoThisPeriod >= 0
+                          ? Colors.green.shade700
+                          : Colors.red.shade700,
+                    ),
+                  ),
+                  Text(
+                    '  • from prev: ${budget.formatCurrency(carryFromPrev, decimalDigits: 0)}',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  Text(
+                    '  • from older: ${budget.formatCurrency(carryFromOlder, decimalDigits: 0)}',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
+                  if (expiredInThisPeriod > 0)
+                    Text(
+                      'Expired: ${budget.formatCurrency(expiredInThisPeriod)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                ],
               ),
           ],
         ),
@@ -268,7 +453,7 @@ class _BudgetScreenState extends State<BudgetDetail> {
             alignment: Alignment.centerLeft,
             child: Text('No expenses in this period',
                 style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     fontStyle: FontStyle.italic,
                     color: Colors.grey)),
           ),
@@ -284,11 +469,11 @@ class _BudgetScreenState extends State<BudgetDetail> {
               children: [
                 Text(
                   '${timeFormat.format(expenseDisplayTime)} (${dateFormat.format(expenseDisplayTime)})',
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(fontSize: 15),
                 ),
                 Text(
                   budget.formatCurrency(e.amount),
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(fontSize: 15),
                 )
               ],
             ),

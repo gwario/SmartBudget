@@ -1,4 +1,5 @@
 import 'package:currency_text_input_formatter/currency_text_input_formatter.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -18,35 +19,35 @@ class BudgetForm extends StatefulWidget {
 class _BudgetFormState extends State<BudgetForm> {
   final dbService = DatabaseService();
   final _formKey = GlobalKey<FormState>();
-  final _periodicityWithParam = [
-    Periodicity.minutes,
-    Periodicity.hours,
-    Periodicity.days,
-    Periodicity.weeks,
-    Periodicity.months,
-    Periodicity.years,
-  ];
 
   String? _title;
   double? _budget;
   int? _periodicityParam;
   Periodicity? _periodicity;
   bool _carryOver = false;
+  int? _carryOverLimit;
   DateTime? _startDateTime = DateTime.now();
   final _dateController = TextEditingController();
 
-  final _enabledPeriodicities = [
-    Periodicity.minutes,
-    Periodicity.hours,
-    Periodicity.daily,
-    Periodicity.days,
-    Periodicity.weekly,
-    Periodicity.weeks,
-    Periodicity.monthly,
-    Periodicity.months,
-    Periodicity.yearly,
-    Periodicity.years,
-  ];
+  List<Periodicity> get _periodicityWithParam => [
+        if (kDebugMode) ...[Periodicity.minutes, Periodicity.hours],
+        Periodicity.days,
+        Periodicity.weeks,
+        Periodicity.months,
+        Periodicity.years,
+      ];
+
+  List<Periodicity> get _enabledPeriodicities => [
+        if (kDebugMode) ...[Periodicity.minutes, Periodicity.hours],
+        Periodicity.daily,
+        Periodicity.days,
+        Periodicity.weekly,
+        Periodicity.weeks,
+        Periodicity.monthly,
+        Periodicity.months,
+        Periodicity.yearly,
+        Periodicity.years,
+      ];
 
   @override
   void initState() {
@@ -166,6 +167,25 @@ class _BudgetFormState extends State<BudgetForm> {
                       ),
                     ],
                   ),
+                  if (_carryOver)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: TextFormField(
+                        initialValue: _carryOverLimit?.toString(),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'\d'))
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _carryOverLimit = int.tryParse(value)),
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: false, signed: false),
+                        decoration: const InputDecoration(
+                          border: UnderlineInputBorder(),
+                          labelText: 'Expires after X periods (optional)',
+                          hintText: 'e.g. 3',
+                        ),
+                      ),
+                    ),
                   DropdownButtonFormField<String>(
                     decoration: const InputDecoration(
                       border: UnderlineInputBorder(),
@@ -294,6 +314,7 @@ class _BudgetFormState extends State<BudgetForm> {
                               balance: 0,
                               schedule: BudgetSchedule(
                                   carryOver: _carryOver,
+                                  carryOverLimit: _carryOverLimit,
                                   budget: (_budget! * 1000000).round(),
                                   periodicity: _periodicity!,
                                   periodParam: _periodicityParam,
