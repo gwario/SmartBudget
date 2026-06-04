@@ -116,8 +116,50 @@ class SettingsProvider with ChangeNotifier {
     return tz.TZDateTime.from(dt, location);
   }
 
-  String get systemCurrency =>
-      NumberFormat.simpleCurrency(locale: Platform.localeName).currencyName ?? 'USD';
+  String get systemCurrency {
+    String locale = Platform.localeName;
+    try {
+      var format = NumberFormat.simpleCurrency(locale: locale);
+      // If it's USD but we are not in the US, try to infer from country code
+      if (format.currencyName == 'USD' &&
+          !locale.contains('_US') &&
+          !locale.contains('-US')) {
+        if (locale.contains(RegExp(r'[_-]'))) {
+          String country = locale.split(RegExp(r'[_-]')).last.toUpperCase();
+          final countryToCurrency = {
+            'AT': 'EUR',
+            'BE': 'EUR',
+            'CY': 'EUR',
+            'EE': 'EUR',
+            'FI': 'EUR',
+            'FR': 'EUR',
+            'DE': 'EUR',
+            'GR': 'EUR',
+            'IE': 'EUR',
+            'IT': 'EUR',
+            'LV': 'EUR',
+            'LT': 'EUR',
+            'LU': 'EUR',
+            'MT': 'EUR',
+            'NL': 'EUR',
+            'PT': 'EUR',
+            'SK': 'EUR',
+            'SI': 'EUR',
+            'ES': 'EUR',
+            'HR': 'EUR',
+            'GB': 'GBP',
+            'CH': 'CHF',
+          };
+          if (countryToCurrency.containsKey(country)) {
+            return countryToCurrency[country]!;
+          }
+        }
+      }
+      return format.currencyName ?? 'USD';
+    } catch (_) {
+      return 'USD';
+    }
+  }
 
   String get effectiveCurrency => _currency ?? systemCurrency;
 }
@@ -310,12 +352,30 @@ class _FirstDayOfWeekSetting extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
     final firstDayIndex = MaterialLocalizations.of(context).firstDayOfWeekIndex;
-    final systemDay = firstDayIndex == 0 ? 'Sunday' : 
-                     (firstDayIndex == 1 ? 'Monday' : 'Unknown');
-    // Note: index 0 is Sunday, 1 is Monday in MaterialLocalizations
-    
+
+    // Flutter index: 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    // We want to map this to our 1 = Monday, ..., 7 = Sunday
+    int systemDayNum;
+    if (firstDayIndex == 0) {
+      systemDayNum = 7; // Sunday
+    } else {
+      systemDayNum = firstDayIndex;
+    }
+
     final days = {
-      null: 'System Default ($systemDay)',
+      1: 'Monday',
+      2: 'Tuesday',
+      3: 'Wednesday',
+      4: 'Thursday',
+      5: 'Friday',
+      6: 'Saturday',
+      7: 'Sunday',
+    };
+
+    String systemDayLabel = days[systemDayNum] ?? 'Unknown';
+
+    final options = {
+      null: 'System Default ($systemDayLabel)',
       1: 'Monday',
       2: 'Tuesday',
       3: 'Wednesday',
@@ -327,14 +387,14 @@ class _FirstDayOfWeekSetting extends StatelessWidget {
 
     return ListTile(
       title: const Text('Start of the Week'),
-      subtitle: Text(days[settings.firstDayOfWeek] ?? 'Unknown'),
+      subtitle: Text(options[settings.firstDayOfWeek] ?? 'Unknown'),
       leading: const Icon(Icons.calendar_view_week),
       trailing: DropdownButton<int?>(
         value: settings.firstDayOfWeek,
         underline: const SizedBox(),
         alignment: Alignment.centerRight,
         onChanged: settings.setFirstDayOfWeek,
-        items: days.entries
+        items: options.entries
             .map((e) => DropdownMenuItem(
                   value: e.key,
                   child: Text(e.value),

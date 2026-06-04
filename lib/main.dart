@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:timezone/data/latest.dart' as tz;
 
+import 'package:flutter_localizations/flutter_localizations.dart';
+
 import 'budget_list.dart';
 import 'settings.dart';
 
@@ -41,6 +43,26 @@ class BudgetScheduleApp extends StatelessWidget {
     return MaterialApp(
       title: 'Budget Schedule',
       locale: locale,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('en', 'US'),
+        Locale('en', 'GB'),
+        Locale('en', 'AT'),
+        Locale('de', 'AT'),
+        Locale('de', 'DE'),
+        Locale('es', 'ES'),
+        Locale('fr', 'FR'),
+        Locale('it', 'IT'),
+        Locale('pt', 'BR'),
+        Locale('ru', 'RU'),
+        Locale('zh', 'CN'),
+        Locale('ja', 'JP'),
+        Locale('ko', 'KR'),
+      ],
       theme: ThemeData(
         // This is the theme of your application.
         //
