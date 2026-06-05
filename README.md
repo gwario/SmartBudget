@@ -37,7 +37,3 @@ SmartBudget is a sophisticated yet easy-to-use periodic budget tracker built wit
 ## 🔧 Development Notes
 
 - **Debug Options**: High-frequency periods (Minutes and Hours) are only available in **Debug** builds to facilitate testing of budget cycles.
-
-## 📄 License
-
-This project is private. (c) 2026
