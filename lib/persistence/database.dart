@@ -239,6 +239,11 @@ class DatabaseService {
     await Expense.insert(db, expense);
   }
 
+  Future<void> deleteExpense(Expense expense) async {
+    final db = await _databaseService.database;
+    await Expense.delete(db, expense);
+  }
+
   Future<List<Expense>> getExpenses(int budgetId) async {
     final db = await _databaseService.database;
     var data = await db.rawQuery(

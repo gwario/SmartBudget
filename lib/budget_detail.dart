@@ -462,20 +462,23 @@ class _BudgetScreenState extends State<BudgetDetail> {
         periodExpenses.sort((a, b) => b.dateTime.compareTo(a.dateTime));
         for (var e in periodExpenses) {
           final expenseDisplayTime = settings.toSelectedTimezone(e.dateTime);
-          widgets.add(Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1, horizontal: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '${timeFormat.format(expenseDisplayTime)} (${dateFormat.format(expenseDisplayTime)})',
-                  style: const TextStyle(fontSize: 15),
-                ),
-                Text(
-                  budget.formatCurrency(e.amount),
-                  style: const TextStyle(fontSize: 15),
-                )
-              ],
+          widgets.add(InkWell(
+            onLongPress: () => _deleteExpense(budget, e),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '${timeFormat.format(expenseDisplayTime)} (${dateFormat.format(expenseDisplayTime)})',
+                    style: const TextStyle(fontSize: 15),
+                  ),
+                  Text(
+                    budget.formatCurrency(e.amount),
+                    style: const TextStyle(fontSize: 15),
+                  )
+                ],
+              ),
             ),
           ));
         }
@@ -486,25 +489,31 @@ class _BudgetScreenState extends State<BudgetDetail> {
 
   void _addExpense(Budget budget) async {
     double? expenseAmount;
+    final formatter = CurrencyTextInputFormatter.currency(
+        name: budget.schedule.currencyCode,
+        enableNegative: false,
+        decimalDigits: 2,
+        minValue: 0);
+
     final expense = await showDialog<double>(
       context: context,
       barrierDismissible: true,
       builder: (BuildContext context) {
         return StatefulBuilder(builder: (context, setDialogState) {
           return SimpleDialog(
-            title: const Text('Add expense'),
+            title: Text('Add expense (${budget.schedule.currencyCode})'),
             children: <Widget>[
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 15),
                 child: TextFormField(
-                  inputFormatters: [_expenseCurrencyFormatter],
+                  inputFormatters: [formatter],
                   onChanged: (value) => setDialogState(() => expenseAmount =
-                      _expenseCurrencyFormatter.getUnformattedValue().toDouble()),
+                      formatter.getUnformattedValue().toDouble()),
                   keyboardType: const TextInputType.numberWithOptions(
                       decimal: true, signed: false),
-                  decoration: const InputDecoration(
-                    border: UnderlineInputBorder(),
-                    labelText: 'Amount',
+                  decoration: InputDecoration(
+                    border: const UnderlineInputBorder(),
+                    labelText: 'Amount (${budget.schedule.currencyCode})',
                   ),
                 ),
               ),
@@ -541,6 +550,33 @@ class _BudgetScreenState extends State<BudgetDetail> {
       final settings = context.read<SettingsProvider>();
       await dbService.updateBalances(locationName: settings.timezone);
       setState(() {});
+    }
+  }
+
+  void _deleteExpense(Budget budget, Expense expense) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Expense'),
+        content: const Text('Are you sure you want to remove this expense?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await dbService.deleteExpense(expense);
+      if (mounted) {
+        final settings = context.read<SettingsProvider>();
+        await dbService.updateBalances(locationName: settings.timezone);
+        setState(() {});
+      }
     }
   }
 
