@@ -199,7 +199,7 @@ class Budget {
     }
   }
 
-  String formatCurrency(num microAmount, {int decimalDigits = 2}) {
+  String formatCurrency(num microAmount, {int decimalDigits = 0}) {
     final format = NumberFormat.simpleCurrency(
         name: schedule.currencyCode, decimalDigits: decimalDigits);
     return format.format(microAmount / 1000000.0);
@@ -380,6 +380,38 @@ class BudgetSchedule {
         break;
     }
     return 'per $n$unit';
+  }
+
+  String getDurationLabel(int periodCount) {
+    int totalUnits = periodCount * (periodParam ?? 1);
+    String unit;
+    switch (periodicity) {
+      case Periodicity.minutes:
+        unit = totalUnits == 1 ? 'minute' : 'minutes';
+        break;
+      case Periodicity.hours:
+        unit = totalUnits == 1 ? 'hour' : 'hours';
+        break;
+      case Periodicity.daily:
+      case Periodicity.days:
+        unit = totalUnits == 1 ? 'day' : 'days';
+        break;
+      case Periodicity.weekly:
+      case Periodicity.weeks:
+        unit = totalUnits == 1 ? 'week' : 'weeks';
+        break;
+      case Periodicity.monthly:
+      case Periodicity.months:
+        unit = totalUnits == 1 ? 'month' : 'months';
+        break;
+      case Periodicity.yearly:
+      case Periodicity.years:
+        unit = totalUnits == 1 ? 'year' : 'years';
+        break;
+      default:
+        unit = totalUnits == 1 ? 'period' : 'periods';
+    }
+    return '$totalUnits $unit ($periodCount periods)';
   }
 
   Map<String, dynamic> toMap() => {

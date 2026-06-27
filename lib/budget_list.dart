@@ -182,7 +182,7 @@ class _OverviewPageState extends State<OverviewPage> {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Text(
-          '${budget.formatCurrency(budget.balance, decimalDigits: 0)} used of ${budget.formatCurrency(baseBudget, decimalDigits: 0)} ${budget.schedule.periodLabelShort}',
+          '${budget.formatCurrency(budget.balance)} used of ${budget.formatCurrency(baseBudget)} ${budget.schedule.periodLabelShort}',
           style: TextStyle(
             fontSize: budgetLabelFontSize,
             color: utilization > 1.0 ? Colors.red : Colors.black,
@@ -190,7 +190,7 @@ class _OverviewPageState extends State<OverviewPage> {
         ),
         if (budget.schedule.carryOver)
           Text(
-            '${carryOver >= 0 ? "+" : ""}${budget.formatCurrency(carryOver, decimalDigits: 0)} from past periods',
+            '${carryOver >= 0 ? "+" : ""}${budget.formatCurrency(carryOver)} from past periods',
             style: TextStyle(
               fontSize: budgetLabelFontSize - 4,
               color: carryOver >= 0 ? Colors.green : Colors.orange,

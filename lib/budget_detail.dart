@@ -24,7 +24,7 @@ class _BudgetScreenState extends State<BudgetDetail> {
     _expenseCurrencyFormatter = CurrencyTextInputFormatter.currency(
         locale: Intl.getCurrentLocale(),
         enableNegative: false,
-        decimalDigits: 2,
+        decimalDigits: 0,
         minValue: 0);
   }
 
@@ -54,10 +54,6 @@ class _BudgetScreenState extends State<BudgetDetail> {
                   backgroundColor: Theme.of(context).colorScheme.inversePrimary,
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _editTitle(budget),
-                    ),
-                    IconButton(
                       icon: const Icon(Icons.refresh),
                       onPressed: () async {
                         final settings = context.read<SettingsProvider>();
@@ -65,6 +61,14 @@ class _BudgetScreenState extends State<BudgetDetail> {
                             locationName: settings.timezone);
                         setState(() {});
                       },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _editTitle(budget),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_forever),
+                      onPressed: () => _deleteBudget(budget),
                     )
                   ],
                   title: SafeArea(
@@ -91,8 +95,8 @@ class _BudgetScreenState extends State<BudgetDetail> {
                             mainAxisAlignment: MainAxisAlignment.start,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildSummaryHeader(budget, expenses, settings),
-                              const SizedBox(height: 15),
+                              _buildWaterfallHeader(budget, expenses, settings),
+                              const SizedBox(height: 10),
                               Expanded(
                                 child: SingleChildScrollView(
                                   child: Column(
@@ -110,37 +114,23 @@ class _BudgetScreenState extends State<BudgetDetail> {
                           );
                         }),
                   )),
-              floatingActionButton: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: FloatingActionButton(
-                      onPressed: () => _addExpense(budget),
-                      tooltip: 'Add',
-                      heroTag: null,
-                      child: const Icon(Icons.monetization_on),
-                    ),
-                  ),
-                  FloatingActionButton(
-                    onPressed: () => _deleteBudget(budget),
-                    tooltip: 'Delete',
-                    heroTag: null,
-                    child: const Icon(Icons.delete_forever),
-                  )
-                ],
+              floatingActionButton: FloatingActionButton(
+                onPressed: () => _addExpense(budget),
+                tooltip: 'Add',
+                child: const Icon(Icons.monetization_on),
               ));
         });
   }
 
-  Widget _buildSummaryHeader(
+  Widget _buildWaterfallHeader(
       Budget budget, List<Expense> expenses, SettingsProvider settings) {
     int currentPeriodIdx =
         budget.getPeriodsElapsed(locationName: settings.timezone) - 1;
 
+    int carryInFromPast = 0;
     int carryFromPrev = 0;
     int carryFromOlder = 0;
-    int expiredInThisPeriod = 0;
+    int n = 0;
 
     if (budget.schedule.carryOver && currentPeriodIdx >= 0) {
       Map<int, int> periodSpentMap = {};
@@ -156,12 +146,12 @@ class _BudgetScreenState extends State<BudgetDetail> {
       int B = budget.schedule.budget;
       int? limit = budget.schedule.carryOverLimit;
 
-      for (int j = 0; j <= currentPeriodIdx; j++) {
-        int avail = B + currentCarryIn;
-        int spent = periodSpentMap[j] ?? 0;
-        int remaining = avail - spent;
+      n = limit ?? currentPeriodIdx;
+      if (n > currentPeriodIdx) n = currentPeriodIdx;
 
+      for (int j = 0; j <= currentPeriodIdx; j++) {
         if (j == currentPeriodIdx) {
+          carryInFromPast = currentCarryIn;
           if (j > 0) {
             carryFromPrev = B - (periodSpentMap[j - 1] ?? 0);
             carryFromOlder = currentCarryIn - carryFromPrev;
@@ -171,132 +161,193 @@ class _BudgetScreenState extends State<BudgetDetail> {
         // Calculate carryIn for j+1
         int nextCarryIn = 0;
         int k = j + 1;
-        int n = limit ?? k;
-        if (n > k) n = k;
-        int firstIdx = k - n;
-
-        int totalAllowanceInWindow = n * B;
+        int winSize = limit ?? k;
+        if (winSize > k) winSize = k;
+        int firstIdx = k - winSize;
+        int totalAllowanceInWindow = winSize * B;
         int totalSpentInWindow = 0;
         for (int i = firstIdx; i < k; i++) {
           totalSpentInWindow += periodSpentMap[i] ?? 0;
         }
         int windowCarryIn = totalAllowanceInWindow - totalSpentInWindow;
 
+        int spent = periodSpentMap[j] ?? 0;
+        int remaining = (B + currentCarryIn) - spent;
+
         if (remaining < 0) {
-          nextCarryIn = remaining;
+          currentCarryIn = remaining;
         } else {
-          nextCarryIn = remaining < windowCarryIn
+          currentCarryIn = remaining < windowCarryIn
               ? remaining
               : (windowCarryIn > 0 ? windowCarryIn : 0);
         }
-
-        if (j == currentPeriodIdx) {
-          expiredInThisPeriod = remaining - nextCarryIn;
-        }
-        currentCarryIn = nextCarryIn;
       }
     }
 
+    final baseBudget = budget.schedule.budget;
+    final totalAvailable = baseBudget + carryInFromPast;
+    final spentThisPeriod = budget.balance;
+    final currentlyLeft = totalAvailable - spentThisPeriod;
     int totalSpent = expenses.fold(0, (sum, e) => sum + e.amount);
+    int elapsed = budget.getPeriodsElapsed(locationName: settings.timezone);
 
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Base Budget', style: TextStyle(fontSize: 16)),
-            Text(
-                '${budget.formatCurrency(budget.schedule.budget)} ${budget.schedule.periodLabel}',
-                style: const TextStyle(fontSize: 16))
-          ],
-        ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Total Spent', style: TextStyle(fontSize: 16)),
-                const Text('Since start',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
-            ),
-            Text(budget.formatCurrency(totalSpent),
-                style: const TextStyle(fontSize: 16))
-          ],
-        ),
-        if (budget.schedule.carryOver) ...[
-          if (budget.totalExpired > 0)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Total Savings', style: TextStyle(fontSize: 16)),
-                    const Text('Expired positive carry over',
-                        style: TextStyle(fontSize: 12, color: Colors.grey)),
-                  ],
-                ),
-                Text(budget.formatCurrency(budget.totalExpired),
-                    style: const TextStyle(fontSize: 18, color: Colors.blue))
-              ],
-            ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Carry Over', style: TextStyle(fontSize: 16)),
-                  if (budget.schedule.carryOverLimit != null)
-                    Text(
-                      'Positive expires after ${budget.schedule.carryOverLimit} periods',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  if (currentPeriodIdx > 0) ...[
-                    Text(
-                      '  • from prev: ${budget.formatCurrency(carryFromPrev, decimalDigits: 0)}',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                    Text(
-                      '  • from older: ${budget.formatCurrency(carryFromOlder, decimalDigits: 0)}',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                  ]
-                ],
-              ),
-              Text(budget.formatCurrency(budget.carryOver),
-                  style: TextStyle(
-                      fontSize: 16,
-                      color: budget.carryOver >= 0 ? Colors.green : Colors.red))
-            ],
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey.shade50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          _buildWaterfallRow(
+            'Base Budget',
+            budget.formatCurrency(baseBudget),
+            icon: Icons.flag_outlined,
+            subLabel: budget.schedule.periodLabel,
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Actual Budget', style: TextStyle(fontSize: 16)),
-              Text(budget.formatCurrency(budget.totalBudget),
-                  style: const TextStyle(fontSize: 18))
-            ],
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Expanded(
+                    child: Divider(
+                        color: Colors.blueGrey.shade200, thickness: 1)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('CURRENT',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.blueGrey.shade300,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2)),
+                ),
+                Expanded(
+                    child: Divider(
+                        color: Colors.blueGrey.shade200, thickness: 1)),
+              ],
+            ),
+          ),
+          _buildWaterfallRow(
+            carryInFromPast >= 0 ? 'Surplus from Past' : 'Deficit from Past',
+            '${carryInFromPast >= 0 ? "+" : ""} ${budget.formatCurrency(carryInFromPast)}',
+            valueColor: carryInFromPast >= 0 ? Colors.green : Colors.red,
+            icon: Icons.history,
+            subLabel: 'from ${budget.schedule.getDurationLabel(n)}',
+          ),
+          const Divider(),
+          _buildWaterfallRow(
+            'Available Now',
+            budget.formatCurrency(totalAvailable),
+            icon: Icons.account_balance_wallet_outlined,
+          ),
+          _buildWaterfallRow(
+            'Spent so far',
+            "- ${budget.formatCurrency(spentThisPeriod)}",
+            icon: Icons.shopping_cart_outlined,
+          ),
+          const Divider(),
+          _buildWaterfallRow(
+            currentlyLeft >= 0 ? 'Remaining' : 'Overspent',
+            budget.formatCurrency(currentlyLeft),
+            valueColor: currentlyLeft >= 0 ? Colors.blue : Colors.red,
+            icon: Icons.summarize_outlined,
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Expanded(
+                    child: Divider(
+                        color: Colors.blueGrey.shade200, thickness: 1)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text('TOTALS',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.blueGrey.shade300,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2)),
+                ),
+                Expanded(
+                    child: Divider(
+                        color: Colors.blueGrey.shade200, thickness: 1)),
+              ],
+            ),
+          ),
+          _buildWaterfallRow(
+            'Total Spent',
+            budget.formatCurrency(totalSpent),
+            icon: Icons.summarize_outlined,
+            subLabel: 'Since start',
+          ),
+          if (budget.totalExpired > 0)
+            _buildWaterfallRow(
+              'Savings Vault',
+              budget.formatCurrency(budget.totalExpired),
+              valueColor: Colors.blue.shade700,
+              icon: Icons.savings_outlined,
+              subLabel: 'protected from overspending',
+            ),
+          _buildWaterfallRow(
+            'Duration',
+            '$elapsed periods',
+            icon: Icons.timer_outlined,
+            subLabel: 'running since creation',
           ),
         ],
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Spent', style: TextStyle(fontSize: 16)),
-                const Text('This Period',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-              ],
+      ),
+    );
+  }
+
+  Widget _buildWaterfallRow(String label, String value,
+      {Color? valueColor,
+      bool isBold = false,
+      IconData? icon,
+      String? subLabel}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    if (icon != null)
+                      Icon(icon, size: 18, color: Colors.blueGrey),
+                    if (icon != null) const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(label,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight:
+                                isBold ? FontWeight.bold : FontWeight.normal,
+                          )),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(value,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                    color: valueColor,
+                  )),
+            ],
+          ),
+          if (subLabel != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 26),
+                child: Text(subLabel,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              ),
             ),
-            Text(budget.formatCurrency(budget.balance),
-                style: const TextStyle(fontSize: 16))
-          ],
-        )
-      ],
+        ],
+      ),
     );
   }
 
@@ -348,9 +399,9 @@ class _BudgetScreenState extends State<BudgetDetail> {
 
       // Calculate carry over into THIS specific period
       int carryOverIntoThisPeriod = 0;
-      int carryFromPrev = 0;
-      int carryFromOlder = 0;
       int expiredInThisPeriod = 0;
+      int limitCount = budget.schedule.carryOverLimit ?? (idx + 1);
+
       if (budget.schedule.carryOver) {
         int currentCarryIn = 0;
         int B = budget.schedule.budget;
@@ -363,10 +414,6 @@ class _BudgetScreenState extends State<BudgetDetail> {
 
           if (j == idx) {
             carryOverIntoThisPeriod = currentCarryIn;
-            if (j > 0) {
-              carryFromPrev = B - (periodSpentMap[j - 1] ?? 0);
-              carryFromOlder = currentCarryIn - carryFromPrev;
-            }
           }
 
           // Calculate carryIn for j+1
@@ -404,46 +451,56 @@ class _BudgetScreenState extends State<BudgetDetail> {
         padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
         margin: const EdgeInsets.only(top: 8, bottom: 2),
         color: Colors.grey.shade200,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
           children: [
-            Text(
-              'Period $idx ($periodLabel)',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            if (budget.schedule.carryOver && idx > 0)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    'Carry in: ${budget.formatCurrency(carryOverIntoThisPeriod)}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: carryOverIntoThisPeriod >= 0
-                          ? Colors.green.shade700
-                          : Colors.red.shade700,
-                    ),
-                  ),
-                  Text(
-                    '  • from prev: ${budget.formatCurrency(carryFromPrev, decimalDigits: 0)}',
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                  Text(
-                    '  • from older: ${budget.formatCurrency(carryFromOlder, decimalDigits: 0)}',
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  ),
-                  if (expiredInThisPeriod > 0)
-                    Text(
-                      'Expired: ${budget.formatCurrency(expiredInThisPeriod)}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.blue,
-                        fontStyle: FontStyle.italic,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Period $idx',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16),
                       ),
-                    ),
-                ],
-              ),
+                      Text(
+                        periodLabel,
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (budget.schedule.carryOver && idx > 0)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        'Rollover from $limitCount periods: ${budget.formatCurrency(carryOverIntoThisPeriod)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: carryOverIntoThisPeriod >= 0
+                              ? Colors.green.shade700
+                              : Colors.red.shade700,
+                        ),
+                      ),
+                      if (expiredInThisPeriod > 0)
+                        Text(
+                          'Moved to Vault: ${budget.formatCurrency(expiredInThisPeriod)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue.shade700,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
+            ),
           ],
         ),
       ));
