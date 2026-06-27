@@ -4,7 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Current]
 
-- **Build Infrastructure**: Upgraded Gradle to 8.14.0, Android Gradle Plugin to 8.11.1, and Kotlin to 2.2.20 for better long-term support and Android 15 compatibility.
+- **Build Infrastructure**: 
+    - Upgraded Gradle to 8.14.0, Android Gradle Plugin to 8.11.1, and Kotlin to 2.2.20 for better long-term support and Android 15 compatibility.
+    - Migrated to Flutter's **Built-in Kotlin** to resolve deprecation warnings and ensure future compatibility.
 
 ## [1.4.0] - 2026-06-27
 
