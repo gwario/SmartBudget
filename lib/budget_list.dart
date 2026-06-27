@@ -10,6 +10,9 @@ import 'package:smart_budget/persistence/database.dart';
 import 'package:smart_budget/settings.dart';
 import 'package:workmanager/workmanager.dart';
 
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+
 import 'persistence/model.dart';
 import 'theme.dart';
 
@@ -18,6 +21,7 @@ const simplePeriodicTask = 'at.ameise.smart_budget.task.updateBalances';
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
+    tz.initializeTimeZones();
     final prefs = await SharedPreferences.getInstance();
     final locationName = prefs.getString('selected_timezone');
     final dbService = DatabaseService();

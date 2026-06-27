@@ -54,6 +54,10 @@ class _BudgetScreenState extends State<BudgetDetail> {
                   backgroundColor: Theme.of(context).colorScheme.inversePrimary,
                   actions: [
                     IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _editTitle(budget),
+                    ),
+                    IconButton(
                       icon: const Icon(Icons.refresh),
                       onPressed: () async {
                         final settings = context.read<SettingsProvider>();
@@ -470,7 +474,7 @@ class _BudgetScreenState extends State<BudgetDetail> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    '${timeFormat.format(expenseDisplayTime)} (${dateFormat.format(expenseDisplayTime)})',
+                    '${dateFormat.format(expenseDisplayTime)} ${timeFormat.format(expenseDisplayTime)}',
                     style: const TextStyle(fontSize: 15),
                   ),
                   Text(
@@ -492,8 +496,8 @@ class _BudgetScreenState extends State<BudgetDetail> {
     final formatter = CurrencyTextInputFormatter.currency(
         name: budget.schedule.currencyCode,
         enableNegative: false,
-        decimalDigits: 2,
-        minValue: 0);
+        decimalDigits: 0,
+        minValue: 1);
 
     final expense = await showDialog<double>(
       context: context,
@@ -510,7 +514,7 @@ class _BudgetScreenState extends State<BudgetDetail> {
                   onChanged: (value) => setDialogState(() => expenseAmount =
                       formatter.getUnformattedValue().toDouble()),
                   keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true, signed: false),
+                      decimal: false, signed: false),
                   decoration: InputDecoration(
                     border: const UnderlineInputBorder(),
                     labelText: 'Amount (${budget.schedule.currencyCode})',
@@ -528,7 +532,7 @@ class _BudgetScreenState extends State<BudgetDetail> {
                   ),
                   SimpleDialogOption(
                     onPressed: () {
-                      if (expenseAmount != null && expenseAmount! > 0) {
+                      if (expenseAmount != null && expenseAmount! >= 1) {
                         Navigator.pop(context, expenseAmount);
                       }
                     },
@@ -549,6 +553,34 @@ class _BudgetScreenState extends State<BudgetDetail> {
           dateTime: DateTime.timestamp()));
       final settings = context.read<SettingsProvider>();
       await dbService.updateBalances(locationName: settings.timezone);
+      setState(() {});
+    }
+  }
+
+  void _editTitle(Budget budget) async {
+    final controller = TextEditingController(text: budget.title);
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Title'),
+        content: TextFormField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Budget Title'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (newTitle != null && newTitle.trim().isNotEmpty) {
+      budget.title = newTitle.trim();
+      await dbService.saveBudget(budget);
       setState(() {});
     }
   }

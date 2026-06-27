@@ -30,17 +30,21 @@ class Budget {
           'schedule INTEGER, '
           'FOREIGN KEY(schedule) REFERENCES budget_schedule(id))');
 
-  static Future<int> insert(Database db, Budget budget) => BudgetSchedule
-          .insert(db, budget.schedule)
-      .then((scheduleId) => db.rawInsert(
-          'INSERT INTO budget(title, balance, carryOver, totalExpired, schedule) VALUES(?,?,?,?,?)',
-          [
-            budget.title,
-            budget.balance,
-            budget.carryOver,
-            budget.totalExpired,
-            scheduleId
-          ]));
+  static Future<int> insert(Database db, Budget budget) async {
+    final scheduleId = await BudgetSchedule.insert(db, budget.schedule);
+    budget.schedule.id = scheduleId;
+    final budgetId = await db.rawInsert(
+        'INSERT INTO budget(title, balance, carryOver, totalExpired, schedule) VALUES(?,?,?,?,?)',
+        [
+          budget.title,
+          budget.balance,
+          budget.carryOver,
+          budget.totalExpired,
+          scheduleId
+        ]);
+    budget.id = budgetId;
+    return budgetId;
+  }
 
   static Future<int> delete(Database db, Budget budget) async {
     await db.rawDelete('DELETE FROM expense WHERE budget = ?', [budget.id]);

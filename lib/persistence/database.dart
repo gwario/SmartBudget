@@ -141,7 +141,6 @@ class DatabaseService {
 
     for (var budget in budgets) {
       final now = tz.TZDateTime.from(DateTime.now(), location);
-      final budgetStart = tz.TZDateTime.from(budget.schedule.start, location);
       int currentPeriodIdx =
           budget.getPeriodIndex(now, locationName: locationName);
 
@@ -157,13 +156,15 @@ class DatabaseService {
       var expensesData = await db.rawQuery(
           'SELECT amount, dateTime FROM expense WHERE budget = ? ORDER BY dateTime ASC',
           [budget.id]);
-      
+
       Map<int, int> periodSpentMap = {};
       for (var row in expensesData) {
-        DateTime dt = DateTime.fromMillisecondsSinceEpoch(row['dateTime'] as int, isUtc: true);
+        DateTime dt =
+            DateTime.fromMillisecondsSinceEpoch(row['dateTime'] as int, isUtc: true);
         int idx = budget.getPeriodIndex(dt, locationName: locationName);
         if (idx >= 0) {
-          periodSpentMap[idx] = (periodSpentMap[idx] ?? 0) + (row['amount'] as int);
+          periodSpentMap[idx] =
+              (periodSpentMap[idx] ?? 0) + (row['amount'] as int);
         }
       }
 
@@ -172,6 +173,10 @@ class DatabaseService {
       int B = budget.schedule.budget;
       int? limit = budget.schedule.carryOverLimit;
 
+      // Sliding window optimization: keep track of spent in the current window
+      // windowSpent = sum of spent from [j+1 - n] to [j]
+      int windowSpent = 0;
+      
       for (int j = 0; j < currentPeriodIdx; j++) {
         int avail = B + carryIn;
         int spent = periodSpentMap[j] ?? 0;
@@ -181,25 +186,32 @@ class DatabaseService {
         int nextCarryIn = 0;
         if (budget.schedule.carryOver) {
           int k = j + 1;
-          int n = budget.schedule.carryOverLimit ?? k;
+          int n = limit ?? k;
           if (n > k) n = k;
-          int firstIdx = k - n;
+          
+          // Update windowSpent for the new k
+          // We need sum of periodSpentMap[i] for i in [k-n, k-1]
+          // i.e. i in [j+1-n, j]
+          
+          // Add current period j spent
+          windowSpent += spent;
+          
+          // If the window moved, subtract the one that fell out
+          // The window for k is [k-n, k-1].
+          // The window for k-1 was [k-1 - n_prev, k-2].
+          if (limit != null && k > limit) {
+            windowSpent -= periodSpentMap[k - limit - 1] ?? 0;
+          }
 
           int totalAllowanceInWindow = n * B;
-          int totalSpentInWindow = 0;
-          for (int i = firstIdx; i < k; i++) {
-            totalSpentInWindow += periodSpentMap[i] ?? 0;
-          }
-          int windowCarryIn = totalAllowanceInWindow - totalSpentInWindow;
+          int windowCarryIn = totalAllowanceInWindow - windowSpent;
 
-          // Debt (negative carry-over) never expires.
-          // Only positive surplus expires if it exceeds the window limit.
           if (remaining < 0) {
             nextCarryIn = remaining;
           } else {
-            // It's a surplus. Cap it by the window, but don't let a window-debt 
-            // expire a global surplus (though that's logically rare if debts don't expire).
-            nextCarryIn = remaining < windowCarryIn ? remaining : (windowCarryIn > 0 ? windowCarryIn : 0);
+            nextCarryIn = remaining < windowCarryIn
+                ? remaining
+                : (windowCarryIn > 0 ? windowCarryIn : 0);
           }
         }
 
