@@ -1,24 +1,24 @@
 # SmartBudget
 
-SmartBudget is a sophisticated yet easy-to-use periodic budget tracker built with Flutter. It's designed for people who want to manage recurring allowances—whether daily, weekly, or monthly—with advanced features like carry-over, savings expiration, and intelligent regional formatting.
+SmartBudget is a sophisticated yet easy-to-use periodic budget tracker built with Flutter. It's designed for people who want to manage recurring allowances—whether daily, weekly, or monthly—with advanced features like surplus rollover, savings expiration, and intelligent regional formatting.
 
 ## 🚀 Key Features
 
+- **Intuitive Waterfall Flow**: Visualize exactly how your available budget is calculated from your base allowance and past performance.
 - **Flexible Periodicities**: Set budgets that repeat every few minutes (debug only), hours (debug only), days, weeks, months, or years.
-- **Intelligent Carry Over**: Automatically carry over your surplus or deficit to the next period.
-- **Smart Expiration**: Define a limit on how many periods a positive surplus can be carried over. Don't lose track of long-term goals by letting your budget accumulate indefinitely.
-- **Total Savings Tracking**: Automatically track money "saved" when carry-over surplus expires.
+- **Intelligent Rollover**: Automatically carry over your surplus or deficit to the next period.
+- **Savings Vault**: Define a limit on how many periods a positive surplus can be carried over. Expired surplus is moved to your "Vault," tracking your long-term savings achievements.
 - **Localized Experience**:
     - **Smart Currency Detection**: Automatically detects your regional currency (e.g., EUR for Austria) even if your UI language is set to English.
     - **Custom Week Starts**: Respects regional standards (Monday vs. Sunday) with manual override options.
     - **Custom Date Formats**: Support for ISO, European, US, and German date styles.
-- **Historical Analysis**: Deep-dive into each period's expenses with a detailed breakdown of where your carry-in came from (previous period vs. older periods).
+- **Historical Analysis**: Deep-dive into each period's expenses with a clear breakdown of rollover history.
 - **Modern Android Support**: Fully compliant with Android 15 edge-to-edge requirements and Material design standards.
 
 ## 🛠 Tech Stack
 
 - **Framework**: [Flutter](https://flutter.dev)
-- **Database**: [SQLite (sqflite)](https://pub.dev/packages/sqflite) for robust local persistence.
+- **Database**: [SQLite (sqflite)](https://pub.dev/packages/sqflite) for robust local persistence with an optimized sliding-window calculation engine.
 - **State Management**: [Provider](https://pub.dev/packages/provider).
 - **Background Tasks**: [Workmanager](https://pub.dev/packages/workmanager) for periodic balance calculations.
 - **Localization**: [intl](https://pub.dev/packages/intl) and `flutter_localizations`.
@@ -37,3 +37,8 @@ SmartBudget is a sophisticated yet easy-to-use periodic budget tracker built wit
 ## 🔧 Development Notes
 
 - **Debug Options**: High-frequency periods (Minutes and Hours) are only available in **Debug** builds to facilitate testing of budget cycles.
+- **Edge-to-Edge**: The app uses modern `WindowCompat` APIs to ensure the UI flows correctly behind system bars on Android 15+ devices.
+
+## 📄 License
+
+See [LICENSE](LICENSE)

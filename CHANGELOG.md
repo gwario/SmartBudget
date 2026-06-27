@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-06-21
+
+### Added
+- **Waterfall View**: Introduced a new intuitive calculation flow as the primary budget summary interface.
+- **Improved Financial Terminology**:
+    - "Carry Over" is now **"Surplus from Past"** or **"Deficit from Past"**.
+    - "Actual Budget" is now **"Available Now"**.
+    - "Carry in" is now **"Rollover"**.
+- **Savings Vault**: Rebranded "Total Savings" and "Expired funds" to the **"Savings Vault"** metaphor, framing saved budget as stashed capital.
+- **Budget Editing**: Users can now edit the title of existing budget schedules.
+- **Full Unit Expenses**: Streamlined expense entry by enforcing whole numbers (minimum 1 unit) and optimized the keyboard for rapid entry.
+- **Summary Reorganization**: Added clear **"CURRENT"** and **"TOTALS"** separators in the detail header to distinguish between periodic math and historical performance.
+- **Duration Tracking**: Explicitly display the total duration a budget schedule has been running.
+
+### Changed
+- **UI Refinement**: Reduced vertical spacing in the header and history list for a more compact, data-dense view.
+- **Simplified History Headers**: Removed redundant visual dots and "prev/older" breakdowns in favor of clear window span labels (e.g., "Rollover from 3 periods").
+- **Currency Formatting**: Defaulted all currency displays to 0 decimal places for a cleaner look.
+- **Navigation Improvement**: Moved the budget deletion button to the AppBar for better safety and focus.
+
+### Fixed
+- Fixed calculation performance for long-running budgets using an optimized sliding window algorithm.
+- Resolved compilation issues related to variable scoping in the detail view.
+
 ## [1.3.0] - 2026-06-20
 
 ### Added
