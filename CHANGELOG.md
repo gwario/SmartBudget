@@ -2,7 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.4.0] - 2026-06-21
+## [Current]
+
+- **Build Infrastructure**: Upgraded Gradle to 8.14.0, Android Gradle Plugin to 8.11.1, and Kotlin to 2.2.20 for better long-term support and Android 15 compatibility.
+
+## [1.4.0] - 2026-06-27
 
 ### Added
 - **Waterfall View**: Introduced a new intuitive calculation flow as the primary budget summary interface.
