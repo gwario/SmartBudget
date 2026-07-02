@@ -96,18 +96,6 @@ class _BudgetFormState extends State<BudgetForm> {
     final currencyFormatter = CurrencyTextInputFormatter.currency(
         name: displayCurrency, decimalDigits: 0, enableNegative: false);
 
-    final commonCurrencies = {
-      'USD': 'US Dollar (\$)',
-      'EUR': 'Euro (€)',
-      'GBP': 'British Pound (£)',
-      'JPY': 'Japanese Yen (¥)',
-      'CHF': 'Swiss Franc (CHF)',
-      'AUD': 'Australian Dollar (A\$)',
-      'CAD': 'Canadian Dollar (C\$)',
-      'CNY': 'Chinese Yuan (¥)',
-      'KWD': 'Kuwaiti Dinar (KWD)',
-    };
-
     return Scaffold(
       appBar: AppBar(
           leading: IconButton(
@@ -202,7 +190,7 @@ class _BudgetFormState extends State<BudgetForm> {
                           _periodicityParam = 1;
                           if (_startDateTime != null) {
                             _startDateTime = DateTime(
-                                _startDateTime!.year, _startDateTime!.month, 1);
+                                _startDateTime!.year, _startDateTime!.month, 1, 12, 0, 0);
                             _updateDateDisplay();
                           }
                         } else if (periodicity == Periodicity.weekly) {
@@ -217,14 +205,16 @@ class _BudgetFormState extends State<BudgetForm> {
                             }
                             final currentDay = _startDateTime!.weekday;
                             final daysToSubtract = (currentDay - targetDay + 7) % 7;
-                            _startDateTime = _startDateTime!.subtract(Duration(days: daysToSubtract));
+                            _startDateTime = DateTime(
+                                _startDateTime!.year, _startDateTime!.month, _startDateTime!.day, 12, 0, 0)
+                                .subtract(Duration(days: daysToSubtract));
                             _updateDateDisplay();
                           }
                         } else if (periodicity == Periodicity.yearly) {
                           _periodicityParam = 1;
                           if (_startDateTime != null) {
                             _startDateTime =
-                                DateTime(_startDateTime!.year, 1, 1);
+                                DateTime(_startDateTime!.year, 1, 1, 12, 0, 0);
                             _updateDateDisplay();
                           }
                         }
@@ -301,12 +291,23 @@ class _BudgetFormState extends State<BudgetForm> {
                             return;
                           }
                           DateTime startTime = _startDateTime!;
-                          // If the user picked today, use current time instead of midnight
-                          final now = DateTime.now();
-                          if (startTime.year == now.year &&
-                              startTime.month == now.month &&
-                              startTime.day == now.day) {
-                            startTime = now;
+                          
+                          final bool isHighFreq = _periodicity == Periodicity.seconds ||
+                              _periodicity == Periodicity.minutes ||
+                              _periodicity == Periodicity.hours;
+
+                          if (!isHighFreq) {
+                            // For daily and longer, use 12:00 PM to avoid timezone shifts when stored as UTC.
+                            // The calculation logic handles the "start of day" normalization.
+                            startTime = DateTime(startTime.year, startTime.month, startTime.day, 12);
+                          } else {
+                            // For high-frequency, use exact time if it's "today"
+                            final now = DateTime.now();
+                            if (startTime.year == now.year &&
+                                startTime.month == now.month &&
+                                startTime.day == now.day) {
+                              startTime = now;
+                            }
                           }
 
                           await dbService.insertBudget(Budget(

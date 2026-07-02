@@ -3,6 +3,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import 'calculator.dart';
 import 'model.dart';
 
 class DatabaseService {
@@ -152,78 +153,25 @@ class DatabaseService {
         continue;
       }
 
-      // Fetch all expenses to calculate history accurately
       var expensesData = await db.rawQuery(
           'SELECT amount, dateTime FROM expense WHERE budget = ? ORDER BY dateTime ASC',
           [budget.id]);
+      List<Expense> expenses = expensesData.map((e) => Expense.fromJson({
+        'id': 0, // Not needed for calculation
+        'budget': budget.id,
+        'amount': e['amount'],
+        'dateTime': e['dateTime'],
+      })).toList();
 
-      Map<int, int> periodSpentMap = {};
-      for (var row in expensesData) {
-        DateTime dt =
-            DateTime.fromMillisecondsSinceEpoch(row['dateTime'] as int, isUtc: true);
-        int idx = budget.getPeriodIndex(dt, locationName: locationName);
-        if (idx >= 0) {
-          periodSpentMap[idx] =
-              (periodSpentMap[idx] ?? 0) + (row['amount'] as int);
-        }
-      }
+      final (balance, carryOver, totalExpired, _, _) = BudgetCalculator.calculateBalances(
+        budget: budget,
+        expenses: expenses,
+        currentPeriodIdx: currentPeriodIdx,
+        locationName: locationName,
+      );
 
-      int totalExpired = 0;
-      int carryIn = 0;
-      int B = budget.schedule.budget;
-      int? limit = budget.schedule.carryOverLimit;
-
-      // Sliding window optimization: keep track of spent in the current window
-      // windowSpent = sum of spent from [j+1 - n] to [j]
-      int windowSpent = 0;
-      
-      for (int j = 0; j < currentPeriodIdx; j++) {
-        int avail = B + carryIn;
-        int spent = periodSpentMap[j] ?? 0;
-        int remaining = avail - spent;
-
-        // Calculate carryIn for j+1
-        int nextCarryIn = 0;
-        if (budget.schedule.carryOver) {
-          int k = j + 1;
-          int n = limit ?? k;
-          if (n > k) n = k;
-          
-          // Update windowSpent for the new k
-          // We need sum of periodSpentMap[i] for i in [k-n, k-1]
-          // i.e. i in [j+1-n, j]
-          
-          // Add current period j spent
-          windowSpent += spent;
-          
-          // If the window moved, subtract the one that fell out
-          // The window for k is [k-n, k-1].
-          // The window for k-1 was [k-1 - n_prev, k-2].
-          if (limit != null && k > limit) {
-            windowSpent -= periodSpentMap[k - limit - 1] ?? 0;
-          }
-
-          int totalAllowanceInWindow = n * B;
-          int windowCarryIn = totalAllowanceInWindow - windowSpent;
-
-          if (remaining < 0) {
-            nextCarryIn = remaining;
-          } else {
-            nextCarryIn = remaining < windowCarryIn
-                ? remaining
-                : (windowCarryIn > 0 ? windowCarryIn : 0);
-          }
-        }
-
-        int expiredInThisPeriod = remaining - nextCarryIn;
-        if (expiredInThisPeriod > 0) {
-          totalExpired += expiredInThisPeriod;
-        }
-        carryIn = nextCarryIn;
-      }
-
-      budget.balance = periodSpentMap[currentPeriodIdx] ?? 0;
-      budget.carryOver = carryIn;
+      budget.balance = balance;
+      budget.carryOver = carryOver;
       budget.totalExpired = totalExpired;
       await saveBudget(budget);
     }

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:smart_budget/persistence/database.dart';
 import 'package:smart_budget/settings.dart';
 
+import 'persistence/calculator.dart';
 import 'persistence/model.dart';
 
 class BudgetDetail extends StatefulWidget {
@@ -16,17 +17,6 @@ class BudgetDetail extends StatefulWidget {
 
 class _BudgetScreenState extends State<BudgetDetail> {
   final dbService = DatabaseService();
-  late CurrencyTextInputFormatter _expenseCurrencyFormatter;
-
-  @override
-  void initState() {
-    super.initState();
-    _expenseCurrencyFormatter = CurrencyTextInputFormatter.currency(
-        locale: Intl.getCurrentLocale(),
-        enableNegative: false,
-        decimalDigits: 0,
-        minValue: 0);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -127,227 +117,169 @@ class _BudgetScreenState extends State<BudgetDetail> {
     int currentPeriodIdx =
         budget.getPeriodsElapsed(locationName: settings.timezone) - 1;
 
-    int carryInFromPast = 0;
-    int carryFromPrev = 0;
-    int carryFromOlder = 0;
+    final (spentThisPeriod, carryInFromPast, totalExpired, _, _) =
+        BudgetCalculator.calculateBalances(
+      budget: budget,
+      expenses: expenses,
+      currentPeriodIdx: currentPeriodIdx,
+      locationName: settings.timezone,
+    );
+
+    // Calculate vault movement for the current transition
+    int vaultMovement = 0;
+    if (currentPeriodIdx >= 0) {
+      final (_, _, _, _, expirations) =
+          BudgetCalculator.calculateBalances(
+        budget: budget,
+        expenses: expenses,
+        currentPeriodIdx: currentPeriodIdx + 1,
+        locationName: settings.timezone,
+      );
+      vaultMovement = expirations[currentPeriodIdx] ?? 0;
+    }
+
     int n = 0;
-
     if (budget.schedule.carryOver && currentPeriodIdx >= 0) {
-      Map<int, int> periodSpentMap = {};
-      for (var e in expenses) {
-        int idx =
-            budget.getPeriodIndex(e.dateTime, locationName: settings.timezone);
-        if (idx >= 0) {
-          periodSpentMap[idx] = (periodSpentMap[idx] ?? 0) + e.amount;
-        }
-      }
-
-      int currentCarryIn = 0;
-      int B = budget.schedule.budget;
       int? limit = budget.schedule.carryOverLimit;
-
       n = limit ?? currentPeriodIdx;
       if (n > currentPeriodIdx) n = currentPeriodIdx;
-
-      for (int j = 0; j <= currentPeriodIdx; j++) {
-        if (j == currentPeriodIdx) {
-          carryInFromPast = currentCarryIn;
-          if (j > 0) {
-            carryFromPrev = B - (periodSpentMap[j - 1] ?? 0);
-            carryFromOlder = currentCarryIn - carryFromPrev;
-          }
-        }
-
-        // Calculate carryIn for j+1
-        int nextCarryIn = 0;
-        int k = j + 1;
-        int winSize = limit ?? k;
-        if (winSize > k) winSize = k;
-        int firstIdx = k - winSize;
-        int totalAllowanceInWindow = winSize * B;
-        int totalSpentInWindow = 0;
-        for (int i = firstIdx; i < k; i++) {
-          totalSpentInWindow += periodSpentMap[i] ?? 0;
-        }
-        int windowCarryIn = totalAllowanceInWindow - totalSpentInWindow;
-
-        int spent = periodSpentMap[j] ?? 0;
-        int remaining = (B + currentCarryIn) - spent;
-
-        if (remaining < 0) {
-          currentCarryIn = remaining;
-        } else {
-          currentCarryIn = remaining < windowCarryIn
-              ? remaining
-              : (windowCarryIn > 0 ? windowCarryIn : 0);
-        }
-      }
     }
 
     final baseBudget = budget.schedule.budget;
     final totalAvailable = baseBudget + carryInFromPast;
-    final spentThisPeriod = budget.balance;
     final currentlyLeft = totalAvailable - spentThisPeriod;
     int totalSpent = expenses.fold(0, (sum, e) => sum + e.amount);
     int elapsed = budget.getPeriodsElapsed(locationName: settings.timezone);
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.blueGrey.shade50,
-        borderRadius: BorderRadius.circular(8),
+    return Card(
+      elevation: 2,
+      margin: EdgeInsets.zero,
+      color: Colors.grey.shade100,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
       ),
-      child: Column(
-        children: [
-          _buildWaterfallRow(
-            'Base Budget',
-            budget.formatCurrency(baseBudget),
-            icon: Icons.flag_outlined,
-            subLabel: budget.schedule.periodLabel,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Expanded(
-                    child: Divider(
-                        color: Colors.blueGrey.shade200, thickness: 1)),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text('CURRENT',
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.blueGrey.shade300,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2)),
-                ),
-                Expanded(
-                    child: Divider(
-                        color: Colors.blueGrey.shade200, thickness: 1)),
+                Icon(Icons.calendar_today, size: 16, color: Colors.blueGrey.shade600),
+                const SizedBox(width: 8),
+                Text('CURRENT PERIOD',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blueGrey.shade700,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.1)),
               ],
             ),
-          ),
-          _buildWaterfallRow(
-            carryInFromPast >= 0 ? 'Surplus from Past' : 'Deficit from Past',
-            '${carryInFromPast >= 0 ? "+" : ""} ${budget.formatCurrency(carryInFromPast)}',
-            valueColor: carryInFromPast >= 0 ? Colors.green : Colors.red,
-            icon: Icons.history,
-            subLabel: 'from ${budget.schedule.getDurationLabel(n)}',
-          ),
-          const Divider(),
-          _buildWaterfallRow(
-            'Available Now',
-            budget.formatCurrency(totalAvailable),
-            icon: Icons.account_balance_wallet_outlined,
-          ),
-          _buildWaterfallRow(
-            'Spent so far',
-            "- ${budget.formatCurrency(spentThisPeriod)}",
-            icon: Icons.shopping_cart_outlined,
-          ),
-          const Divider(),
-          _buildWaterfallRow(
-            currentlyLeft >= 0 ? 'Remaining' : 'Overspent',
-            budget.formatCurrency(currentlyLeft),
-            valueColor: currentlyLeft >= 0 ? Colors.blue : Colors.red,
-            icon: Icons.summarize_outlined,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                    child: Divider(
-                        color: Colors.blueGrey.shade200, thickness: 1)),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text('TOTALS',
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.blueGrey.shade300,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2)),
+                  child: Column(
+                    children: [
+                      _buildMetric('Allowance', budget.formatCurrency(baseBudget),
+                          Icons.add_circle_outline, Colors.blueGrey.shade700),
+                      const SizedBox(height: 12),
+                      _buildMetric(
+                          carryInFromPast >= 0 ? 'Surplus In' : 'Deficit In',
+                          budget.formatCurrency(carryInFromPast),
+                          Icons.history,
+                          carryInFromPast >= 0 ? Colors.green : Colors.red),
+                      const Divider(height: 24),
+                      _buildMetric('Available', budget.formatCurrency(totalAvailable),
+                          Icons.account_balance_wallet, Colors.blue.shade800,
+                          isBold: true),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 24),
                 Expanded(
-                    child: Divider(
-                        color: Colors.blueGrey.shade200, thickness: 1)),
+                  child: Column(
+                    children: [
+                      _buildMetric('Spent', budget.formatCurrency(spentThisPeriod),
+                          Icons.shopping_cart_outlined, Colors.orange.shade800),
+                      const SizedBox(height: 12),
+                      _buildMetric(
+                          currentlyLeft >= 0 ? 'Unspent' : 'Net Overspent',
+                          budget.formatCurrency(currentlyLeft.abs()),
+                          Icons.timelapse,
+                          currentlyLeft >= 0 ? Colors.blue : Colors.red),
+                      const Divider(height: 24),
+                      _buildMetric('Vault Growth', budget.formatCurrency(vaultMovement),
+                          Icons.savings_outlined, Colors.green.shade600),
+                    ],
+                  ),
+                ),
               ],
             ),
-          ),
-          _buildWaterfallRow(
-            'Total Spent',
-            budget.formatCurrency(totalSpent),
-            icon: Icons.summarize_outlined,
-            subLabel: 'Since start',
-          ),
-          if (budget.totalExpired > 0)
-            _buildWaterfallRow(
-              'Savings Vault',
-              budget.formatCurrency(budget.totalExpired),
-              valueColor: Colors.blue.shade700,
-              icon: Icons.savings_outlined,
-              subLabel: 'protected from overspending',
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildSmallInfo(Icons.summarize, 'Total Spent',
+                      budget.formatCurrency(totalSpent)),
+                  _buildSmallInfo(Icons.account_balance, 'Vault Total',
+                      budget.formatCurrency(totalExpired)),
+                  _buildSmallInfo(Icons.timer, 'Duration', '$elapsed periods'),
+                ],
+              ),
             ),
-          _buildWaterfallRow(
-            'Duration',
-            '$elapsed periods',
-            icon: Icons.timer_outlined,
-            subLabel: 'running since creation',
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildWaterfallRow(String label, String value,
-      {Color? valueColor,
-      bool isBold = false,
-      IconData? icon,
-      String? subLabel}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    if (icon != null)
-                      Icon(icon, size: 18, color: Colors.blueGrey),
-                    if (icon != null) const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(label,
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight:
-                                isBold ? FontWeight.bold : FontWeight.normal,
-                          )),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(value,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
-                    color: valueColor,
-                  )),
-            ],
-          ),
-          if (subLabel != null)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 26),
-                child: Text(subLabel,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
-              ),
-            ),
-        ],
-      ),
+  Widget _buildMetric(
+      String label, String value, IconData icon, Color color,
+      {bool isBold = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: color.withValues(alpha: 0.7)),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(fontSize: 11, color: Colors.blueGrey.shade600)),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(value,
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+                color: color)),
+      ],
+    );
+  }
+
+  Widget _buildSmallInfo(IconData icon, String label, String value) {
+    return Column(
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: Colors.blueGrey.shade400),
+            const SizedBox(width: 4),
+            Text(label,
+                style: TextStyle(fontSize: 10, color: Colors.blueGrey.shade500)),
+          ],
+        ),
+        Text(value,
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.blueGrey.shade800)),
+      ],
     );
   }
 
@@ -359,6 +291,13 @@ class _BudgetScreenState extends State<BudgetDetail> {
     final dateFormat = settings.getDateFormat();
     final detailFormat = settings.getDateFormat(includeTime: true);
 
+    int currentPeriodIdx =
+        budget.getPeriodsElapsed(locationName: settings.timezone) - 1;
+
+    // Get sorted period indices descending (newest periods first)
+    List<int> indices = List.generate(currentPeriodIdx + 1, (i) => i)
+      ..sort((a, b) => b.compareTo(a));
+
     // Group expenses by period index
     Map<int, List<Expense>> groups = {};
     for (var e in expenses) {
@@ -367,20 +306,13 @@ class _BudgetScreenState extends State<BudgetDetail> {
       groups.putIfAbsent(idx, () => []).add(e);
     }
 
-    // Get sorted period indices descending (newest periods first)
-    // Now including ALL periods up to current
-    int currentPeriodIdx =
-        budget.getPeriodsElapsed(locationName: settings.timezone) - 1;
-    List<int> indices = List.generate(currentPeriodIdx + 1, (i) => i)
-      ..sort((a, b) => b.compareTo(a));
-
-    // Calculate spent per period to determine carry over history
-    Map<int, int> periodSpentMap = {};
-    for (var e in expenses) {
-      int idx =
-          budget.getPeriodIndex(e.dateTime, locationName: settings.timezone);
-      periodSpentMap[idx] = (periodSpentMap[idx] ?? 0) + e.amount;
-    }
+    // Calculate ALL expirations once for the entire list
+    final (_, _, _, _, allExpirations) = BudgetCalculator.calculateBalances(
+      budget: budget,
+      expenses: expenses,
+      currentPeriodIdx: currentPeriodIdx + 1,
+      locationName: settings.timezone,
+    );
 
     for (int idx in indices) {
       final periodStartUtc =
@@ -397,155 +329,162 @@ class _BudgetScreenState extends State<BudgetDetail> {
         periodLabel = dateFormat.format(periodStartDisplay);
       }
 
-      // Calculate carry over into THIS specific period
-      int carryOverIntoThisPeriod = 0;
-      int expiredInThisPeriod = 0;
+      // Calculate carry over into THIS specific period using the helper
+      final (spentInPeriod, carryOverIntoThisPeriod, _, _, _) =
+          BudgetCalculator.calculateBalances(
+        budget: budget,
+        expenses: expenses,
+        currentPeriodIdx: idx,
+        locationName: settings.timezone,
+      );
+
+      final expiredInThisPeriod = allExpirations[idx] ?? 0;
+
+      final totalAvail = budget.schedule.budget + carryOverIntoThisPeriod;
+      final remaining = totalAvail - spentInPeriod;
+
       int limitCount = budget.schedule.carryOverLimit ?? (idx + 1);
+      if (limitCount > idx) limitCount = idx;
 
-      if (budget.schedule.carryOver) {
-        int currentCarryIn = 0;
-        int B = budget.schedule.budget;
-        int? limit = budget.schedule.carryOverLimit;
-
-        for (int j = 0; j <= idx; j++) {
-          int avail = B + currentCarryIn;
-          int spent = periodSpentMap[j] ?? 0;
-          int remaining = avail - spent;
-
-          if (j == idx) {
-            carryOverIntoThisPeriod = currentCarryIn;
-          }
-
-          // Calculate carryIn for j+1
-          int nextCarryIn = 0;
-          int k = j + 1;
-          int n = limit ?? k;
-          if (n > k) n = k;
-          int firstIdx = k - n;
-
-          int totalAllowanceInWindow = n * B;
-          int totalSpentInWindow = 0;
-          for (int i = firstIdx; i < k; i++) {
-            totalSpentInWindow += periodSpentMap[i] ?? 0;
-          }
-          int windowCarryIn = totalAllowanceInWindow - totalSpentInWindow;
-
-          if (remaining < 0) {
-            nextCarryIn = remaining;
-          } else {
-            nextCarryIn = remaining < windowCarryIn
-                ? remaining
-                : (windowCarryIn > 0 ? windowCarryIn : 0);
-          }
-
-          if (j == idx) {
-            expiredInThisPeriod = remaining - nextCarryIn;
-          }
-          currentCarryIn = nextCarryIn;
-        }
-      }
-
-      // Period Header
-      widgets.add(Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-        margin: const EdgeInsets.only(top: 8, bottom: 2),
-        color: Colors.grey.shade200,
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Period $idx',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      Text(
-                        periodLabel,
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (budget.schedule.carryOver && idx > 0)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        'Rollover from $limitCount periods: ${budget.formatCurrency(carryOverIntoThisPeriod)}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: carryOverIntoThisPeriod >= 0
-                              ? Colors.green.shade700
-                              : Colors.red.shade700,
-                        ),
-                      ),
-                      if (expiredInThisPeriod > 0)
-                        Text(
-                          'Moved to Vault: ${budget.formatCurrency(expiredInThisPeriod)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue.shade700,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                    ],
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ));
-
-      // Expenses in this period (newest first)
-      final periodExpenses = groups[idx] ?? [];
-      if (periodExpenses.isEmpty) {
-        widgets.add(const Padding(
-          padding: EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text('No expenses in this period',
+      // ExpansionTile for each period
+      widgets.add(Card(
+        elevation: 0,
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: Colors.grey.shade300)),
+        child: ExpansionTile(
+          initiallyExpanded: idx == currentPeriodIdx,
+          title: Text(
+              'Period ${idx + 1}${idx == currentPeriodIdx ? " (current)" : ""}',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Text(periodLabel, style: const TextStyle(fontSize: 12)),
+          trailing: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('Spent: ${budget.formatCurrency(spentInPeriod)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(
+                '${remaining >= 0 ? 'Unspent' : 'Net Overspent'}: ${budget.formatCurrency(remaining.abs())}',
                 style: TextStyle(
-                    fontSize: 14,
-                    fontStyle: FontStyle.italic,
-                    color: Colors.grey)),
+                    fontSize: 11,
+                    color: remaining >= 0 ? Colors.blue : Colors.red),
+              ),
+              if (expiredInThisPeriod > 0)
+                Text(
+                  'Vaulted: ${budget.formatCurrency(expiredInThisPeriod)}',
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.green.shade700,
+                      fontStyle: FontStyle.italic),
+                ),
+            ],
           ),
-        ));
-      } else {
-        periodExpenses.sort((a, b) => b.dateTime.compareTo(a.dateTime));
-        for (var e in periodExpenses) {
-          final expenseDisplayTime = settings.toSelectedTimezone(e.dateTime);
-          widgets.add(InkWell(
-            onLongPress: () => _deleteExpense(budget, e),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          shape: const Border(),
+          collapsedShape: const Border(),
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    '${dateFormat.format(expenseDisplayTime)} ${timeFormat.format(expenseDisplayTime)}',
-                    style: const TextStyle(fontSize: 15),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Period Allowance:',
+                          style: TextStyle(fontSize: 12)),
+                      Text(budget.formatCurrency(budget.schedule.budget),
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
                   ),
-                  Text(
-                    budget.formatCurrency(e.amount),
-                    style: const TextStyle(fontSize: 15),
-                  )
+                  if (budget.schedule.carryOver && idx > 0) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Rollover ($limitCount periods):',
+                            style: const TextStyle(fontSize: 12)),
+                        Text(budget.formatCurrency(carryOverIntoThisPeriod),
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: carryOverIntoThisPeriod >= 0
+                                    ? Colors.green
+                                    : Colors.red)),
+                      ],
+                    ),
+                    if (expiredInThisPeriod > 0) ...[
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Moved to Savings Vault:',
+                              style: TextStyle(fontSize: 12)),
+                          Text(budget.formatCurrency(expiredInThisPeriod),
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green.shade700)),
+                        ],
+                      ),
+                    ],
+                  ],
                 ],
               ),
             ),
-          ));
-        }
-      }
+            const Divider(height: 1),
+            // Expenses in this period
+            ..._buildExpenseList(groups[idx] ?? [], budget, settings, dateFormat, timeFormat),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ));
     }
     return widgets;
+  }
+
+  List<Widget> _buildExpenseList(List<Expense> periodExpenses, Budget budget,
+      SettingsProvider settings, DateFormat dateFormat, DateFormat timeFormat) {
+    if (periodExpenses.isEmpty) {
+      return [
+        const Padding(
+          padding: EdgeInsets.all(12),
+          child: Text('No expenses in this period',
+              style: TextStyle(fontStyle: FontStyle.italic, color: Colors.grey)),
+        )
+      ];
+    }
+    periodExpenses.sort((a, b) => b.dateTime.compareTo(a.dateTime));
+    return periodExpenses.map((e) {
+      final expenseDisplayTime = settings.toSelectedTimezone(e.dateTime);
+      return InkWell(
+        onLongPress: () => _deleteExpense(budget, e),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${dateFormat.format(expenseDisplayTime)} ${timeFormat.format(expenseDisplayTime)}',
+                style: const TextStyle(fontSize: 14),
+              ),
+              Text(
+                budget.formatCurrency(e.amount),
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              )
+            ],
+          ),
+        ),
+      );
+    }).toList();
   }
 
   void _addExpense(Budget budget) async {

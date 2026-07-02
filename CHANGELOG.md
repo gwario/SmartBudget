@@ -4,9 +4,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Current]
 
-- **Build Infrastructure**: 
-    - Upgraded Gradle to 8.14.0, Android Gradle Plugin to 8.11.1, and Kotlin to 2.2.20 for better long-term support and Android 15 compatibility.
-    - Migrated to Flutter's **Built-in Kotlin** to resolve deprecation warnings and ensure future compatibility.
+\-
+
+## [1.5.0] - 2026-06-30
+
+### Added
+- **Core Calculation Engine**: Introduced a dedicated `BudgetCalculator` using a FIFO-based simulation for precise rollover and expiration math.
+- **Enhanced Detail View**: 
+    - Redesigned the header into a two-column dashboard for better tracking of "Inbound" (Allowance, Rollover) vs "Outbound" (Spent, Unspent) metrics.
+    - Implemented a collapsible history list where each period is an expansion panel, significantly reducing clutter.
+- **Improved Period Tracking**: 
+    - Added "Period Allowance" and per-period "Vaulting" details to historical records.
+    - Switched to 1-based period numbering for a more natural user experience.
+- **Unit Testing**: Added a comprehensive test suite for budget logic, including timezone edge cases and complex rollover scenarios.
+
+### Changed
+- **Terminology Refinement**: Standardized on "Net Overspent" to describe negative balances and "Vault Growth" for savings tracking.
+- **UI Polishing**: 
+    - Removed unnecessary seconds from all periodic timestamps.
+    - Updated color-coding to clearly distinguish between spending (orange/red) and savings (green).
+    - Improved dashboard prominence with a custom elevated card style.
+
+### Fixed
+- **Timezone Robustness**: Resolved edge cases where budgets created near midnight could shift days due to UTC conversion.
+- **Rollover Logic**: Fixed a bug where surplus funds could linger beyond their expiration limit in specific period transitions.
+
+## [1.4.1] - 2026-06-30
+
+### Fixed
+- **Timezone Synchronization**: Resolved a bug where budget schedules starting on the 1st of a month/week could incorrectly shift to the previous day due to UTC conversion, leading to incorrect surplus calculations.
+- **Robust Period Calculation**: Improved period index calculation to respect device local time and implemented "start-of-day" normalization for daily/weekly/monthly schedules, ensuring they remain stable even when created near midnight.
+
+### Changed
+- **Build Infrastructure**:
+  - Upgraded Gradle to 8.14.0, Android Gradle Plugin to 8.11.1, and Kotlin to 2.2.20 for better long-term support and Android 15 compatibility.
+  - Migrated to Flutter's **Built-in Kotlin** to resolve deprecation warnings and ensure future compatibility.
 
 ## [1.4.0] - 2026-06-27
 

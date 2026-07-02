@@ -101,10 +101,10 @@ class SettingsProvider with ChangeNotifier {
   DateFormat getDateFormat({bool includeTime = false}) {
     if (_dateFormat != null) {
       return includeTime
-          ? DateFormat("$_dateFormat HH:mm:ss")
+          ? DateFormat("$_dateFormat HH:mm")
           : DateFormat(_dateFormat);
     }
-    return includeTime ? DateFormat.yMd().add_Hms() : DateFormat.yMd();
+    return includeTime ? DateFormat.yMd().add_Hm() : DateFormat.yMd();
   }
 
   DateFormat getTimeFormat() {

@@ -4,7 +4,8 @@ SmartBudget is a sophisticated yet easy-to-use periodic budget tracker built wit
 
 ## 🚀 Key Features
 
-- **Intuitive Waterfall Flow**: Visualize exactly how your available budget is calculated from your base allowance and past performance.
+- **Intuitive Budget Dashboard**: Visualize exactly how your available budget is calculated from your base allowance and past performance in a clear two-column summary.
+- **Collapsible History**: Deep-dive into each period's expenses with a clean, expandable breakdown of rollover history and period-specific allowance.
 - **Flexible Periodicities**: Set budgets that repeat every few minutes (debug only), hours (debug only), days, weeks, months, or years.
 - **Intelligent Rollover**: Automatically carry over your surplus or deficit to the next period.
 - **Savings Vault**: Define a limit on how many periods a positive surplus can be carried over. Expired surplus is moved to your "Vault," tracking your long-term savings achievements.
@@ -33,6 +34,13 @@ SmartBudget is a sophisticated yet easy-to-use periodic budget tracker built wit
 1. Clone the repository.
 2. Run `flutter pub get` to fetch dependencies.
 3. Run `flutter run` to start the app on your connected device.
+
+## 🧪 Testing
+
+The project includes unit tests for the core budget logic (rollover, timezone handling, periodicity).
+
+- **Run all tests**: `flutter test`
+- **Run specific test file**: `flutter test test/budget_logic_test.dart`
 
 ## 🔧 Development Notes
 

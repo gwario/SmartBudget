@@ -85,40 +85,63 @@ class Budget {
   int get totalBudget => schedule.budget + carryOver;
 
   int getPeriodsElapsed({String? locationName}) {
-    final location =
-        locationName != null ? tz.getLocation(locationName) : tz.local;
-    final now = tz.TZDateTime.from(DateTime.now(), location);
-    final start = tz.TZDateTime.from(schedule.start, location);
+    final DateTime now;
+    final DateTime start;
 
-    if (now.isBefore(start)) return 0;
+    if (locationName != null) {
+      final location = tz.getLocation(locationName);
+      now = tz.TZDateTime.from(DateTime.now(), location);
+      start = tz.TZDateTime.from(schedule.start, location);
+    } else {
+      now = DateTime.now();
+      start = schedule.start.isUtc ? schedule.start.toLocal() : schedule.start;
+    }
+
+    final bool isHighFreq = schedule.periodicity == Periodicity.seconds ||
+        schedule.periodicity == Periodicity.minutes ||
+        schedule.periodicity == Periodicity.hours;
+
+    final DateTime nowEffective;
+    final DateTime startEffective;
+
+    if (isHighFreq) {
+      nowEffective = now;
+      startEffective = start;
+    } else {
+      nowEffective = DateTime(now.year, now.month, now.day);
+      startEffective = DateTime(start.year, start.month, start.day);
+    }
+
+    if (nowEffective.isBefore(startEffective)) return 0;
 
     int n = schedule.periodParam ?? 1;
     int units = 0;
     switch (schedule.periodicity) {
       case Periodicity.seconds:
-        units = now.difference(start).inSeconds;
+        units = nowEffective.difference(startEffective).inSeconds;
         break;
       case Periodicity.minutes:
-        units = now.difference(start).inMinutes;
+        units = nowEffective.difference(startEffective).inMinutes;
         break;
       case Periodicity.hours:
-        units = now.difference(start).inHours;
+        units = nowEffective.difference(startEffective).inHours;
         break;
       case Periodicity.daily:
       case Periodicity.days:
-        units = now.difference(start).inDays;
+        units = nowEffective.difference(startEffective).inDays;
         break;
       case Periodicity.weekly:
       case Periodicity.weeks:
-        units = (now.difference(start).inDays / 7).floor();
+        units = (nowEffective.difference(startEffective).inDays / 7).floor();
         break;
       case Periodicity.monthly:
       case Periodicity.months:
-        units = (now.year - start.year) * 12 + (now.month - start.month);
+        units = (nowEffective.year - startEffective.year) * 12 +
+            (nowEffective.month - startEffective.month);
         break;
       case Periodicity.yearly:
       case Periodicity.years:
-        units = (now.year - start.year);
+        units = (nowEffective.year - startEffective.year);
         break;
     }
     return (units / n).floor() + 1;
@@ -129,73 +152,144 @@ class Budget {
   double get utilization => totalBudget == 0 ? 0 : balance / totalBudget;
 
   int getPeriodIndex(DateTime dt, {String? locationName}) {
-    final location =
-        locationName != null ? tz.getLocation(locationName) : tz.local;
-    final start = tz.TZDateTime.from(schedule.start, location);
-    final d = tz.TZDateTime.from(dt, location);
+    final DateTime d;
+    final DateTime start;
 
-    if (d.isBefore(start)) return -1;
+    if (locationName != null) {
+      final location = tz.getLocation(locationName);
+      d = tz.TZDateTime.from(dt, location);
+      start = tz.TZDateTime.from(schedule.start, location);
+    } else {
+      d = dt.isUtc ? dt.toLocal() : dt;
+      start = schedule.start.isUtc ? schedule.start.toLocal() : schedule.start;
+    }
+
+    final bool isHighFreq = schedule.periodicity == Periodicity.seconds ||
+        schedule.periodicity == Periodicity.minutes ||
+        schedule.periodicity == Periodicity.hours;
+
+    final DateTime dEffective;
+    final DateTime startEffective;
+
+    if (isHighFreq) {
+      dEffective = d;
+      startEffective = start;
+    } else {
+      dEffective = DateTime(d.year, d.month, d.day);
+      startEffective = DateTime(start.year, start.month, start.day);
+    }
+
+    if (dEffective.isBefore(startEffective)) return -1;
 
     int n = schedule.periodParam ?? 1;
     int units = 0;
     switch (schedule.periodicity) {
       case Periodicity.seconds:
-        units = d.difference(start).inSeconds;
+        units = dEffective.difference(startEffective).inSeconds;
         break;
       case Periodicity.minutes:
-        units = d.difference(start).inMinutes;
+        units = dEffective.difference(startEffective).inMinutes;
         break;
       case Periodicity.hours:
-        units = d.difference(start).inHours;
+        units = dEffective.difference(startEffective).inHours;
         break;
       case Periodicity.daily:
       case Periodicity.days:
-        units = d.difference(start).inDays;
+        units = dEffective.difference(startEffective).inDays;
         break;
       case Periodicity.weekly:
       case Periodicity.weeks:
-        units = (d.difference(start).inDays / 7).floor();
+        units = (dEffective.difference(startEffective).inDays / 7).floor();
         break;
       case Periodicity.monthly:
       case Periodicity.months:
-        units = (d.year - start.year) * 12 + (d.month - start.month);
+        units = (dEffective.year - startEffective.year) * 12 +
+            (dEffective.month - startEffective.month);
         break;
       case Periodicity.yearly:
       case Periodicity.years:
-        units = (d.year - start.year);
+        units = (dEffective.year - startEffective.year);
         break;
     }
     return (units / n).floor();
   }
 
   DateTime getPeriodStart(int index, {String? locationName}) {
-    final location =
-        locationName != null ? tz.getLocation(locationName) : tz.local;
-    final start = tz.TZDateTime.from(schedule.start, location);
+    final DateTime start;
+    final tz.Location? location;
+
+    if (locationName != null) {
+      location = tz.getLocation(locationName);
+      start = tz.TZDateTime.from(schedule.start, location);
+    } else {
+      location = null;
+      start = schedule.start.isUtc ? schedule.start.toLocal() : schedule.start;
+    }
+
+    final bool isHighFreq = schedule.periodicity == Periodicity.seconds ||
+        schedule.periodicity == Periodicity.minutes ||
+        schedule.periodicity == Periodicity.hours;
+
+    final DateTime startEffective = isHighFreq
+        ? start
+        : DateTime(start.year, start.month, start.day);
+
     int n = schedule.periodParam ?? 1;
     int totalUnits = index * n;
 
     switch (schedule.periodicity) {
       case Periodicity.seconds:
-        return start.add(Duration(seconds: totalUnits));
+        return startEffective.add(Duration(seconds: totalUnits));
       case Periodicity.minutes:
-        return start.add(Duration(minutes: totalUnits));
+        return startEffective.add(Duration(minutes: totalUnits));
       case Periodicity.hours:
-        return start.add(Duration(hours: totalUnits));
+        return startEffective.add(Duration(hours: totalUnits));
       case Periodicity.daily:
       case Periodicity.days:
-        return start.add(Duration(days: totalUnits));
+        return startEffective.add(Duration(days: totalUnits));
       case Periodicity.weekly:
       case Periodicity.weeks:
-        return start.add(Duration(days: totalUnits * 7));
+        return startEffective.add(Duration(days: totalUnits * 7));
       case Periodicity.monthly:
       case Periodicity.months:
-        return tz.TZDateTime(location, start.year, start.month + totalUnits,
-            start.day, start.hour, start.minute, start.second);
+        if (location != null) {
+          return tz.TZDateTime(
+              location,
+              startEffective.year,
+              startEffective.month + totalUnits,
+              startEffective.day,
+              startEffective.hour,
+              startEffective.minute,
+              startEffective.second);
+        } else {
+          return DateTime(
+              startEffective.year,
+              startEffective.month + totalUnits,
+              startEffective.day,
+              startEffective.hour,
+              startEffective.minute,
+              startEffective.second);
+        }
       case Periodicity.yearly:
       case Periodicity.years:
-        return tz.TZDateTime(location, start.year + totalUnits, start.month,
-            start.day, start.hour, start.minute, start.second);
+        if (location != null) {
+          return tz.TZDateTime(
+              location,
+              startEffective.year + totalUnits,
+              startEffective.month,
+              startEffective.day,
+              startEffective.hour,
+              startEffective.minute,
+              startEffective.second);
+        } else {
+          return DateTime(
+              startEffective.year + totalUnits,
+              startEffective.month,
+              startEffective.day,
+              startEffective.hour,
+              startEffective.minute,
+              startEffective.second);
+        }
     }
   }
 
